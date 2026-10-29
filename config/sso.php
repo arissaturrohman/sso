@@ -62,4 +62,20 @@ return [
         'state_max_length' => 512,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | CSP form-action
+    |--------------------------------------------------------------------------
+    | Chrome/Chromium menerapkan direktif `form-action` pada seluruh rantai
+    | redirect yang dipicu submit form. Karena submit form login berakhir di
+    | aplikasi client (origin berbeda), origin tersebut harus diizinkan —
+    | jika tidak, browser memblokir login SSO.
+    |
+    | Isi dengan origin aplikasi client, mis. http://localhost:8001.
+    */
+    'form_action_origins' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('SSO_FORM_ACTION_ORIGINS', ''))
+    ))),
+
 ];

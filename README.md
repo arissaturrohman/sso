@@ -23,7 +23,7 @@ Sistem **Single Sign-On (SSO)** lengkap dengan **Single Logout (SLO)**:
   - Audit pengiriman tersimpan di `sso_logout_audit`
 - **Monitoring perangkat & sesi aktif** — halaman `/sessions` + putus sesi per-perangkat
 - **Rate limiting** — `POST /login` 5x/menit per IP & per identifier; `POST /oauth/token` 15x/menit per client+IP
-- **Security headers** — CSP, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy, HSTS (saat HTTPS)
+- **Security headers** — CSP, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy, HSTS (saat HTTPS); `form-action` memakai allowlist origin aplikasi klien (`SSO_FORM_ACTION_ORIGINS`) agar login dari alur redirect tidak diblokir browser
 - **Session fixation protection** — session regenerate saat login & logout
 - **Anti open-redirect** — `post_logout_redirect_uri` divalidasi terhadap `redirect_uris` client
 - **Panel Admin (role `admin`)** — CRUD user & aplikasi klien OAuth: registrasi client dengan secret ditampilkan sekali, regenerate secret, revoke client (token ikut dicabut) — lihat [Cara Menambahkan Aplikasi Klien](#-cara-menambahkan--membuat-aplikasi-klien-baru)
@@ -36,9 +36,45 @@ Sistem **Single Sign-On (SSO)** lengkap dengan **Single Logout (SLO)**:
 
 ## 🚀 Menjalankan
 
-### Prasyarat
-- PHP 8.2+, Composer, MySQL (Laragon: jalankan MySQL dulu)
-- OAuth keys: `storage/oauth-private.key` & `storage/oauth-public.key`
+### Prasyarat & Dependency
+
+#### Yang wajib di server IdP
+
+| Kebutuhan | Versi | Keterangan |
+|---|---|---|
+| **PHP** | 8.2+ (diuji 8.3) | Ekstensi wajib: `openssl`, `pdo_mysql`, `mbstring`, `curl`, `json`, `ctype`, `fileinfo`, `tokenizer`, `xml`, `bcmath`, `sodium` |
+| **Composer** | 2.x | Install dependency PHP |
+| **MySQL / MariaDB** | 8.0+ / 10.4+ | Database `sso_idp` |
+| **Queue worker** | — | **Wajib saat `QUEUE_CONNECTION` ≠ `sync`**; queue `slo` dipakai mengirim back-channel logout |
+| **Passport keys (RS256)** | — | `storage/oauth-private.key` & `storage/oauth-public.key` (dipakai juga untuk menandatangani `logout_token`) |
+| **Node.js + npm** | 20+ / 10+ | **Opsional** — hanya bila ingin `npm run build` (aset Vite; UI utama IdP memakai CSS inline, `public/build` tidak wajib) |
+
+Paket Composer yang dipakai IdP (sudah tercantum di `composer.json`):
+
+| Paket | Versi | Fungsi |
+|---|---|---|
+| `laravel/framework` | `^12.0` | Framework |
+| `laravel/passport` | `13.0` | OAuth 2.0 server: authorization code, token, revoke |
+| `firebase/php-jwt` | `6.10` | Menandatangani `logout_token` (RS256) + verifikasi di sisi klien |
+| `laravel/tinker` | `^2.10` | Registrasi client & operasi manual via CLI |
+
+Dependency pengembangan (tidak perlu di produksi): `phpunit/phpunit ^11.5`, `nunomaduro/collision ^8.6`, `mockery/mockery ^1.6`, `fakerphp/faker ^1.23`, `laravel/pint ^1.13`, `laravel/pail ^1.2`, `laravel/sail ^1.41`.
+
+Frontend (`devDependencies`, opsional): `vite ^6`, `laravel-vite-plugin ^1.2`, `tailwindcss ^4`, `@tailwindcss/vite ^4`, `axios`, `concurrently`.
+
+```bash
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate --force
+
+# Jalankan hanya jika QUEUE_CONNECTION bukan "sync"
+php artisan queue:work --queue=slo
+```
+
+> **Penting:** dengan `QUEUE_CONNECTION=sync`, job back-channel dijalankan inline saat
+> request logout — cukup untuk dev, tetapi **tidak** memberi retry/backoff. Untuk
+> produksi gunakan `database`/`redis` + worker `--queue=slo` seperti di atas.
 
 ### Setup IdP
 ```bash
@@ -129,8 +165,6 @@ php artisan serve --port=8000                        # dev saja; produksi pakai 
 
 ## 🧪 Testing
 
-## 🧪 Testing
-
 Script test E2E (test-*.php) telah dihapus bersama folder demo-client.
 Verifikasi manual yang disarankan setelah deploy:
 
@@ -138,10 +172,12 @@ Verifikasi manual yang disarankan setelah deploy:
 2. Login via email **dan** via NIP → dashboard tampil
 3. `/admin` dengan role `admin` → 200; dengan role `user` → 403
 4. Registrasi client baru via Panel Admin → secret tampil sekali
-5. Logout di dashboard IdP → semua token revoked (`sso_logout_audit` tercatat)
-6. Buat user baru → login dengan password dari WhatsApp → **dipaksa ganti password**;
+5. Login dari aplikasi klien **di browser** (bukan curl) → form login IdP bisa
+   disubmit, callback kembali ke aplikasi (bukti `SSO_FORM_ACTION_ORIGINS` benar)
+6. Logout di dashboard IdP → semua token revoked (`sso_logout_audit` tercatat)
+7. Buat user baru → login dengan password dari WhatsApp → **dipaksa ganti password**;
    setelah ganti, akses `/dashboard` & `/oauth/authorize` berjalan normal
-7. Login sebagai **admin** dan **user** → tombol **Ubah Password** di dashboard berfungsi
+8. Login sebagai **admin** dan **user** → tombol **Ubah Password** di dashboard berfungsi
    dan hanya bisa dipakai setelah memverifikasi password lama
 
 ---
@@ -204,6 +240,10 @@ DB_DATABASE=sso_idp
 SESSION_DOMAIN=null           # null = host-only (paling aman)
 SESSION_ENCRYPT=true
 QUEUE_CONNECTION=sync         # ganti ke redis di produksi
+
+# CSP `form-action`: origin aplikasi klien (dipisah koma).
+# Wajib diisi agar form login IdP bisa disubmit saat alur dimulai dari aplikasi klien.
+SSO_FORM_ACTION_ORIGINS=https://simdesa.ukpbj.demakkab.go.id,https://simukpbj.demakkab.go.id
 
 # WhatsApp gateway (Fonnte) — kirim password akun baru
 FONNTE_TOKEN=xxxxxxxxxxxx
@@ -373,7 +413,66 @@ Halaman ini tidak dibatasi role — user biasa tidak mendapat 403.
 
 Setiap aplikasi (SP) yang ingin memakai SSO harus **diregistrasikan dulu di IdP** agar
 mendapat `Client ID` & `Client Secret`. Registrasi dilakukan oleh **admin** melalui
-Panel Admin IdP.
+Panel Admin IdP. Setelah terdaftar, aplikasi klien wajib memakai
+**Authorization Code + PKCE (S256)** dan (agar ikut ter-logout) menyediakan
+**Back-Channel Logout**.
+
+### Ringkasan Nilai yang Harus Disiapkan
+
+Siapkan 4 URL aplikasi klien **sebelum** membuka form registrasi. Nilainya harus
+final karena `redirect_uris` dibandingkan **exact-match** oleh IdP.
+
+| Kebutuhan | Contoh | Wajib | Dipakai untuk |
+|---|---|---|---|
+| Callback OAuth | `https://simdesa.ukpbj.demakkab.go.id/auth/callback` | ✅ | `redirect_uri` saat authorize & tukar token |
+| Halaman setelah logout | `https://simdesa.ukpbj.demakkab.go.id/` | ⬜ (disarankan) | `post_logout_redirect_uri` |
+| Endpoint back-channel logout | `https://simdesa.ukpbj.demakkab.go.id/sso/backchannel-logout` | ✅ untuk SLO | menerima `logout_token` dari IdP (server-to-server) |
+| Halaman awal aplikasi | `https://simdesa.ukpbj.demakkab.go.id/` | ⬜ | kartu **Aplikasi Terhubung** di dashboard IdP |
+
+> Aturan umum: **HTTPS wajib di produksi**, tanpa trailing slash tambahan, tanpa
+> query string, dan `http://` ≠ `https://` ≠ `http://localhost` — semuanya dianggap
+> URI berbeda.
+
+### Langkah 0 — Dependency Aplikasi Klien
+
+Sebelum mengubah kode, pastikan aplikasi klien memenuhi dependency berikut:
+
+| Kebutuhan | Wajib? | Keterangan |
+|---|---|---|
+| **PHP 8.2+** | ✅ | Ekstensi: `curl`, `openssl`, `mbstring`, `json`, `fileinfo`, `pdo` + driver DB, `tokenizer`, `xml`, `ctype` |
+| **Laravel 10/11/12** (`Illuminate\Support\Facades\Http`) | ✅ | Dipakai untuk tukar token, `/oauth/userinfo`, revoke, dan fetch JWKS |
+| **`firebase/php-jwt` `^6.10`** | ✅ | Verifikasi `logout_token` RS256 + parsing JWKS (`JWK::parseKeySet`) |
+| **`guzzlehttp/guzzle` `^7.8`** | ✅ | Backend HTTP client Laravel. Tanpa ini `Http::post(...)` melempar *“Guzzle HTTP client is not installed”* |
+| **`SESSION_DRIVER=database`** | ✅ untuk SLO | Back-channel menghapus baris di tabel `sessions` berdasarkan `user_id` |
+| **Kolom `users.sso_sub` (unik) + `nip`** | ✅ | Mapping `sub` IdP → user lokal; **tanpa ini back-channel tidak menemukan user** |
+| **`laravel/passport`, Socialite** | ❌ | **Tidak diperlukan** di aplikasi klien |
+| **Filament** (`filament/filament`) | ⬜ | Hanya jika aplikasi klien memakai panel Filament; butuh Node.js/npm untuk aset panel |
+| **Node.js + npm** | ⬜ | Hanya bila aplikasi klien punya aset Vite/Tailwind sendiri |
+
+Install:
+
+```bash
+composer require firebase/php-jwt:^6.10 guzzlehttp/guzzle:^7.8
+
+# setelah menambahkan kolom sso_sub & nip ke tabel users
+php artisan migrate
+```
+
+Dependency minimum `composer.json` aplikasi klien (contoh):
+
+```json
+{
+    "require": {
+        "php": "^8.2",
+        "laravel/framework": "^12.0",
+        "firebase/php-jwt": "^6.10",
+        "guzzlehttp/guzzle": "^7.8"
+    }
+}
+```
+
+> Aplikasi klien **tidak** memerlukan `laravel/passport` — token OAuth diterbitkan IdP.
+> Yang wajib hanya HTTP client + `firebase/php-jwt` untuk memverifikasi logout token.
 
 ### Langkah 1 — Login sebagai Admin
 
@@ -390,14 +489,37 @@ Panel Admin IdP.
 
 ### Langkah 3 — Isi Form Registrasi
 
-| Field | Contoh | Wajib? | Keterangan |
+Buka **`/admin/clients/create`** (tombol **+ Registrasi Client**), lalu isi:
+
+| Field | Contoh | Wajib? | Aturan validasi & keterangan |
 |---|---|---|---|
-| **Nama Aplikasi** | `SIMDESA Kabupaten Demak` | ✅ | Ditampilkan di halaman consent IdP |
-| **Redirect URIs** | `https://simdesa.ukpbj.demakkab.go.id/auth/callback` | ✅ | URI ke-1 = callback OAuth. URI ke-2 (opsional) = halaman post-logout. Kosongkan URI kedua jika tidak dipakai |
-| **Landing URL** | `https://simdesa.ukpbj.demakkab.go.id/` | Untuk dashboard | Halaman awal aplikasi — jika diisi, aplikasi tampil sebagai kartu **"Aplikasi Terhubung"** di dashboard user (dibuka di tab baru) |
-| **Back-Channel Logout URI** | `https://simdesa.ukpbj.demakkab.go.id/sso/backchannel-logout` | Untuk SLO | **Wajib** agar aplikasi ikut ter-logout saat Single Logout |
-| **Front-Channel Logout URI** | — | Opsional | Alternatif SLO via iframe browser |
-| **Trusted** | ✔ centang | Opsional | Skip halaman consent (langsung authorize) |
+| **Nama Aplikasi** | `SIMDESA Kabupaten Demak` | ✅ | Maks. 255 karakter. Ditampilkan di halaman consent IdP. |
+| **Redirect URIs** (kolom 1) | `https://simdesa.ukpbj.demakkab.go.id/auth/callback` | ✅ | Minimal 1 URI, tiap URI harus URL valid & maks. 255 karakter. Nilai ini yang dipakai sebagai `redirect_uri`. |
+| **Redirect URIs** (kolom 2) | `https://simdesa.ukpbj.demakkab.go.id/` | ⬜ | Hanya dipakai sebagai `post_logout_redirect_uri`. Kosongkan bila tidak perlu. |
+| **Landing URL** | `https://simdesa.ukpbj.demakkab.go.id/` | ⬜ | Jika diisi, aplikasi muncul sebagai kartu **Aplikasi Terhubung** di dashboard user IdP (dibuka di tab baru). |
+| **Back-Channel Logout URI** | `https://simdesa.ukpbj.demakkab.go.id/sso/backchannel-logout` | ⬜\* | \*Tanpa ini SLO tidak terkirim. Wajib **HTTPS** (kecuali `localhost`/loopback saat `APP_ENV=local`), host **publik** (bukan IP privat/link-local/metadata), tanpa `user`/`pass`/`fragment`, maks. 255 karakter. |
+| **Front-Channel Logout URI** | — | ⬜ | Hanya disimpan sebagai metadata; IdP saat ini **belum** mengirim front-channel (iframe). |
+| **Trusted** | ✔ centang | ⬜ | Melewati halaman consent (langsung authorize). Cocok untuk aplikasi internal/first-party. |
+
+Hal yang sering salah:
+
+- **`redirect_uris` disimpan sebagai array.** URI ke-1 = callback OAuth, URI ke-2 =
+  tujuan post-logout. Daftar yang sama dipakai untuk memvalidasi
+  `post_logout_redirect_uri`, jadi nilai yang dikirim saat logout **harus persis**
+  salah satu isi daftar ini.
+- **Jangan ada trailing slash tambahan** — `.../auth/callback` ≠ `.../auth/callback/`.
+- **`http` vs `https` dianggap berbeda.** Di produksi `http` ditolak untuk
+  `post_logout_redirect_uri` (kecuali loopback).
+- **`backchannel_logout_uri` divalidasi anti-SSRF** saat disimpan *dan* setiap akan
+  dikirim: host di-resolve DNS, alamat privat/reserved ditolak. Untuk pengujian
+  lokal `http://localhost:8001/...` tetap diizinkan selama `APP_ENV` = `local`/`testing`.
+- **Bila `Trusted` tidak dicentang**, user akan melihat halaman consent IdP yang
+  menampilkan daftar scope (`openid`, `profile`, `email`, atau `*`) dan harus menyetujuinya
+  sebelum diarahkan kembali ke aplikasi.
+- **`Client Secret` jangan pernah ditaruh di frontend/JavaScript** — hanya dipakai
+  server-to-server saat tukar token.
+- **Client yang dicabut (`revoked=1`) tidak bisa dipakai lagi** — token ditolak dan
+  back-channel tidak dikirim. Daftarkan client baru bila sudah di-revoke.
 
 > ⚠️ `Redirect URIs` & `Back-Channel Logout URI` **harus sama persis** dengan
 > `SSO_REDIRECT_URI` dan endpoint back-channel di aplikasi klien —
@@ -406,12 +528,14 @@ Panel Admin IdP.
 
 ### Langkah 4 — Simpan Kredensial (Secret Tampil Sekali!)
 
-Setelah klik **Registrasi**, IdP langsung mengarahkan ke halaman **Client Secret**:
+Setelah klik **Registrasi**, IdP langsung mengarahkan ke halaman **Client Secret**
+(`/admin/clients/{id}/secret`):
 
 - 🟨 `Client ID` dan `Client Secret` ditampilkan **HANYA PADA HALAMAN INI**
 - Klik tombol **Copy** untuk masing-masing nilai, lalu simpan ke secret manager / tempat aman
-- Jika halaman ditutup tanpa menyimpan, secret tidak bisa dilihat lagi —
-  satu-satunya jalan adalah **Regenerate Secret** (secret lama hangus)
+- Jika halaman ditutup tanpa menyimpan, halaman ini akan `404` bila dibuka lagi —
+  satu-satunya jalan adalah **Regenerate Secret** (secret lama langsung hangus)
+- `Client Secret` adalah string acak 40 karakter; perlakukan seperti password
 
 ### Langkah 5 — Pasang Kredensial di Aplikasi Klien
 
@@ -425,14 +549,223 @@ SSO_REDIRECT_URI=https://simdesa.ukpbj.demakkab.go.id/auth/callback
 SSO_POST_LOGOUT_URI=https://simdesa.ukpbj.demakkab.go.id/goodbye
 ```
 
-### Langkah 6 — Uji Alur
+### Langkah 6 — Penuhi Kontrak Teknis IdP
 
-1. Akses halaman terproteksi aplikasi klien → harus redirect ke halaman login IdP
-2. Login → kembali ke dashboard klien dengan sesi aktif
-3. Tekan **Keluar (Aplikasi Ini)** di klien → sesi klien berakhir, diarahkan ke
-   dashboard IdP, dan **sesi IdP tetap aktif** (masuk lagi tanpa login ulang)
-4. Tekan **Logout Semua (SSO)** → global logout & back-channel terkirim ke semua
-   aplikasi (cek tabel `sso_logout_audit` di IdP: status harus `delivered`)
+Registrasi saja belum cukup: aplikasi klien harus berperilaku sesuai kontrak berikut.
+Semuanya sudah ditegakkan IdP, jadi penyimpangan akan menghasilkan `400`.
+
+| Kontrak | Detail |
+|---|---|
+| **Grant** | Hanya **Authorization Code**. Implicit grant (`response_type=token`) diblokir. |
+| **PKCE** | **Wajib S256**. `code_challenge` 43–128 karakter, `code_challenge_method=S256`. Tanpa itu `/oauth/authorize` → `400`. |
+| **Client type** | Client bersifat **confidential** → tukar token wajib mengirim `client_secret`. |
+| **Swap token** | `POST /oauth/token` (`application/x-www-form-urlencoded`) dengan `grant_type=authorization_code`, `code`, `redirect_uri`, `code_verifier`, `client_id`, `client_secret`. |
+| **Tidak ada `id_token`** | Passport di sini **tidak** menerbitkan `id_token`. Identitas diambil dari `GET /oauth/userinfo` dengan header `Authorization: Bearer <access_token>`. |
+| **Klaim profil** | `sub` (ID user IdP, **string**), `name`, `email`, `email_verified`, `nip`, `updated_at`. |
+| **Scope** | Default `openid profile email` bila parameter `scope` tidak dikirim. `*` = akses penuh (harus diminta eksplisit). |
+| **Umur token** | Access token **15 menit**, refresh token **14 hari**. Refresh token **di-rotasi**: token lama dicabut setelah dipakai, reuse → `400 invalid_grant`. |
+| **Rate limit** | `POST /oauth/token` 15×/menit per `client_id`+IP; `POST /login` 5×/menit per IP & identifier. |
+| **Mapping user lokal** | Simpan `sub` ke kolom unik (mis. `users.sso_sub`). Back-channel logout menghapus sesi berdasarkan `sub` ini. |
+
+### Langkah 7 — Izinkan Origin Aplikasi pada CSP IdP
+
+Chrome/Chromium menerapkan direktif `form-action` **pada seluruh rantai redirect**
+yang dipicu submit form login. Karena rantai itu berakhir di aplikasi klien (origin
+berbeda), origin klien harus didaftarkan — kalau tidak, browser memblokir login
+dengan pesan *“Sending form data ... violates ... form-action”*.
+
+Tambahkan origin aplikasi ke `.env` IdP (dipisah koma bila lebih dari satu), lalu bersihkan cache:
+
+```env
+SSO_FORM_ACTION_ORIGINS=https://simdesa.ukpbj.demakkab.go.id,https://simukpbj.demakkab.go.id
+```
+
+```bash
+php artisan config:clear   # atau config:cache bila memakai cache konfigurasi
+```
+
+Nilai ini dibaca `config/sso.php` → `form_action_origins` dan dipakai
+`app/Http/Middleware/SecurityHeaders.php`. Hasilnya header menjadi:
+
+```
+Content-Security-Policy: ...; form-action 'self' https://simdesa.ukpbj.demakkab.go.id; ...
+```
+
+> Origin = **skema + host + port**, tanpa path. Contoh benar: `http://localhost:8001`.
+> Contoh salah: `http://localhost:8001/auth/callback`.
+
+### Langkah 8 — Uji Alur
+
+| # | Uji | Hasil yang diharapkan |
+|---|---|---|
+| 1 | Buka route terproteksi aplikasi klien | `302` ke `/oauth/authorize` IdP (dengan `state` + `code_challenge`) |
+| 2 | Login di IdP | Kembali ke callback klien → sesi klien aktif, user langsung masuk aplikasi |
+| 3 | Buka aplikasi klien lagi saat sesi IdP masih hidup | Tidak diminta password lagi |
+| 4 | Tunggu > 15 menit lalu gunakan aplikasi | Access token di-refresh otomatis (`grant_type=refresh_token`), user tidak terganggu |
+| 5 | Logout lokal (opsional) | Sesi klien berakhir, diarahkan ke IdP, **sesi IdP tetap aktif** |
+| 6 | Logout SSO / SLO | IdP mencabut semua token & sesi, mengirim back-channel ke aplikasi klien |
+| 7 | Cek `sso_logout_audit` di IdP | `status = delivered`, `http_status = 200` untuk client tersebut |
+| 8 | Setelah SLO, buka aplikasi klien lagi | Diminta login ulang (sesi klien benar-benar hancur) |
+| 9 | Buka aplikasi di **browser** (bukan curl) | Form login IdP bisa disubmit (bukti Langkah 7 sudah benar) |
+
+Query string SLO yang dikirim aplikasi klien ke IdP:
+
+```
+GET /sso/logout?client_id=<CLIENT_ID>&post_logout_redirect_uri=<URL terdaftar>&state=<opsional>
+```
+
+- `post_logout_redirect_uri` **harus** salah satu isi `redirect_uris` — jika tidak,
+  IdP menjawab `400 Permintaan logout tidak valid.`
+- `state` dikembalikan IdP dengan menempelkannya sebagai query `state=` pada URL tujuan.
+- Endpoint ini tidak butuh autentikasi; bila sesi IdP sudah tidak ada, IdP hanya
+  melakukan redirect tervalidasi.
+
+### Kontrak Endpoint Back-Channel Logout
+
+IdP mengirim logout token **server-to-server** (bukan lewat browser), jadi endpoint
+ini wajib benar-benar berfungsi.
+
+**Request dari IdP**
+
+```http
+POST /sso/backchannel-logout HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+logout_token=<JWT>
+```
+
+- Timeout: connect 3 dtk, total 5 dtk. **Redirect tidak diikuti** (`withoutRedirecting`).
+- Tidak ada header otorisasi — keaslian dibuktikan oleh tanda tangan JWT.
+- CSRF middleware **harus dikecualikan** untuk path ini.
+
+**Klaim di dalam `logout_token` (RS256, `kid=passport-key-1` — default)**
+
+| Klaim | Isi |
+|---|---|
+| `iss` | `config('sso.issuer')` IdP (mis. `https://sso.ukpbj.demakkab.go.id`) — bandingkan **exact-match** |
+| `aud` | Array berisi `client_id` aplikasi ini |
+| `iat`, `exp` | `exp` maksimal 120 detik dari `iat`; sediakan toleransi clock skew (mis. 60 dtk) |
+| `jti` | Unik per pengiriman → wajib dipakai untuk **anti-replay** (cache ≥ 10 menit) |
+| `events` | `{"http://schemas.openid.net/event/backchannel-logout": {}}` — wajib ada |
+| `sub` | ID user IdP sebagai **string** → cocokkan dengan `users.sso_sub` |
+| `sid` | `session_hash` sesi IdP↔client (opsional dipakai, berguna untuk logout per-perangkat) |
+
+Urutan verifikasi di aplikasi klien: **tanda tangan (JWKS) → `iss` → `aud` → `events` →
+`exp`/`iat` → `jti` (anti-replay) → hapus sesi user dengan `sub` tersebut.**
+
+**Respons yang diharapkan IdP**
+
+| Respons | Status audit | Perilaku IdP |
+|---|---|---|
+| `2xx` (mis. `200 {"status":"ok"}`) | `delivered` | Selesai |
+| `400`/`401`/`403`/`404`/`422` | `failed_permanent` | Tidak di-retry — token Anda anggap ditolak |
+| `408`, `425`, `429`, `5xx`, timeout, connection error | `failed` | Di-retry: 5 percobaan, backoff 5s → 30s → 2m → 10m → 30m (maks. 15 menit) |
+
+> `3xx` tidak diikuti (redirect dianggap gagal), jadi **balas `2xx` langsung** dari endpoint.
+
+> Endpoint harus **idempoten**: boleh menerima token yang sama berulang kali tanpa error.
+> Jika sedang sibuk/tidak bisa memverifikasi (mis. JWKS belum tersedia), balas `503`
+> agar IdP mencoba lagi — jangan balas `200` palsu, karena sesi di aplikasi klien
+> tidak akan pernah hancur.
+
+**JWKS & jebakan dev-server**
+
+- Ambil kunci publik di `GET {SSO_ISSUER}/oauth/jwks`, cache ±1 jam.
+- Simpan salinan terakhir yang sukses ke file dan pakai sebagai **stale fallback** bila
+  fetch gagal. Tanpa ini, `php artisan serve` (single-worker, Windows) bisa **deadlock**:
+  IdP sibuk mengirim back-channel → klien mem-fetch JWKS ke IdP → IdP tidak bisa melayani.
+- Praktik yang dipakai SIM-UKPBJ: **prewarm JWKS saat callback login** (IdP sedang tidak
+  sibuk) sehingga saat logout verifikasi tidak perlu HTTP ke IdP.
+
+### Registrasi Tanpa Panel Admin (Seeder / Tinker)
+
+Untuk seeding otomatis atau lingkungan CI, client bisa dibuat lewat kode:
+
+```bash
+php artisan tinker
+```
+
+```php
+use Laravel\Passport\ClientRepository;
+
+$client = app(ClientRepository::class)->createAuthorizationCodeGrantClient(
+    name: 'SIMDESA Kabupaten Demak',
+    redirectUris: [
+        'https://simdesa.ukpbj.demakkab.go.id/auth/callback', // callback OAuth
+        'https://simdesa.ukpbj.demakkab.go.id/',              // tujuan post-logout
+    ],
+    confidential: true,
+);
+
+$client->forceFill([
+    'trusted' => true,                                                   // lewati consent
+    'landing_url' => 'https://simdesa.ukpbj.demakkab.go.id/',
+    'backchannel_logout_uri' => 'https://simdesa.ukpbj.demakkab.go.id/sso/backchannel-logout',
+])->save();
+
+echo "CLIENT_ID={$client->id}\n";
+echo "CLIENT_SECRET={$client->plainSecret}\n";   // hanya tersedia saat pembuatan
+```
+
+Regenerate secret (secret lama langsung hangus):
+
+```php
+$client->forceFill(['secret' => \Illuminate\Support\Str::random(40)])->save();
+```
+
+Kolom penting pada tabel `oauth_clients`:
+
+| Kolom | Nilai | Keterangan |
+| --- | --- | --- |
+| `name` | `Nama Aplikasi Klien` | Nama yang ditampilkan di halaman consent IdP |
+| `redirect_uris` | `["https://app/auth/callback", "https://app/"]` | JSON array; wajib sesuai `SSO_REDIRECT_URI` & `SSO_POST_LOGOUT_URI` |
+| `trusted` | `1` | Opsional, jika `1` halaman consent otomatis di-skip |
+| `landing_url` | `https://app/` | Opsional, memunculkan kartu di dashboard user IdP |
+| `backchannel_logout_uri` | `https://app/sso/backchannel-logout` | **Wajib** agar IdP mengirim logout token saat SLO |
+| `revoked` | `0` | Pastikan client aktif |
+
+> Secret disimpan sebagai **hash** (cast `hashed` Passport), bukan plaintext. Nilai
+> aslinya hanya tersedia lewat `$client->plainSecret` tepat setelah pembuatan.
+
+### Troubleshooting Registrasi & Integrasi
+
+| Gejala | Penyebab umum | Solusi |
+|---|---|---|
+| `400 invalid_client` saat tukar token | `client_secret` salah, sudah di-regenerate, atau client `revoked=1` | Salin ulang secret; pastikan client aktif |
+| `400 invalid_grant` | Code sudah dipakai/kedaluwarsa, `redirect_uri` beda, `code_verifier` salah, atau refresh token lama dipakai ulang | Satu code satu kali; `redirect_uri` exact-match; simpan `code_verifier` di sesi; pakai refresh token terbaru |
+| `400 Parameter code_challenge dan code_challenge_method wajib ada` | PKCE belum dikirim | Kirim `code_challenge` + `code_challenge_method=S256` |
+| `400 Hanya code_challenge_method=S256 yang didukung` | Memakai `plain` | Ganti ke S256 (SHA-256 + base64url) |
+| Login di browser diblokir: *violates ... form-action* | Origin klien belum diizinkan CSP IdP | Set `SSO_FORM_ACTION_ORIGINS`, lalu `php artisan config:clear` |
+| `/sso/logout` → `400 Permintaan logout tidak valid.` | `post_logout_redirect_uri` tidak terdaftar, client revoked, atau `http` di produksi | Daftarkan URI itu di `redirect_uris`; pakai HTTPS |
+| Back-channel tidak pernah diterima, `sso_logout_audit` kosong | `backchannel_logout_uri` kosong, client revoked, atau user belum pernah menyelesaikan authorize (tidak ada baris `sso_sessions`) | Isi URI back-channel; login ulang agar sesi ter-track |
+| Back-channel dibalas `419` | CSRF middleware aktif | Tambahkan path ke `validateCsrfTokens(except: [...])` |
+| Back-channel dibalas `302` | Endpoint melakukan redirect | Kembalikan `200` JSON langsung |
+| Audit `failed_permanent` (400) | Token ditolak klien: `iss`/`aud`/`events` salah, JWKS beda, `jti` dianggap replay | Periksa `SSO_ISSUER` & `SSO_CLIENT_ID`; bersihkan cache JWKS; jangan menolak `jti` yang belum pernah dilihat |
+| Audit `failed` lalu retry | Endpoint `5xx`/timeout/`429` | Perbaiki endpoint; IdP retry otomatis maks. 15 menit |
+| Logout di IdP tapi user masih login di aplikasi | Back-channel gagal / tidak ada | Cek audit & log IdP; uji endpoint dengan token asli |
+| `429 Too Many Requests` di `/oauth/token` | Batas 15×/menit per client+IP | Cache access token sampai mendekati 15 menit |
+| Dev Windows macet/timeout saat logout | Deadlock JWKS pada `artisan serve` single-worker | Prewarm JWKS saat login + stale fallback, atau jalankan multi-worker/PHP-FPM |
+| Alert **“This page has expired”** (HTTP 419) di aplikasi klien Filament | Polling Livewire berjalan saat sesi sudah dihapus (logout/back-channel) | Hook `Livewire.hook('request', ...)` → `preventDefault()` untuk 419; arahkan ke halaman login SSO |
+
+### Contoh Nyata: SIM-UKPBJ (ARJUNA)
+
+Integrasi nyata yang sudah berjalan: **SIM-UKPBJ / ARJUNA** (aplikasi Filament
+terpisah) — memakai access token + `/oauth/userinfo`, PKCE S256, dan back-channel logout.
+
+| Item | Nilai |
+|---|---|
+| IdP | `http://localhost:8000` (dev) |
+| Aplikasi klien | `http://localhost:8001` (panel Filament `/admin`) |
+| Redirect URI (callback) | `http://localhost:8001/sso/callback` |
+| Post-logout URI | `http://localhost:8001/` |
+| Back-Channel Logout URI | `http://localhost:8001/sso/backchannel-logout` |
+| Trusted | `1` (tanpa halaman consent) |
+| Cek SLO | `sso_logout_audit` → `delivered` / HTTP 200 |
+
+Alur yang dipakai: root `/` tidak menampilkan halaman perantara — sudah login langsung
+`/admin`, belum login langsung memulai SSO. Logout panel (`POST /admin/logout`)
+diteruskan ke `/sso/logout` IdP (RP-initiated SLO) sehingga sesi IdP + aplikasi lain ikut
+berakhir.
 
 ### Aplikasi di Dashboard User
 
@@ -446,22 +779,40 @@ mengklik kartu:
 
 > Client tanpa Landing URL tidak muncul di dashboard — isi melalui menu
 > **Edit** pada daftar aplikasi klien.
+>
+> Jika halaman awal aplikasi bersifat **publik** (root tidak memaksa login),
+> jangan isi Landing URL dengan `/`. Arahkan ke endpoint auto-login aplikasi
+> (contoh: `http://rup-app.test/sso/auto`) supaya klik kartu langsung membuat
+> sesi login, bukan sekadar membuka halaman publik dalam keadaan belum login.
 
 ### Mengelola Klien yang Sudah Ada
 
-Dari daftar **Kelola Aplikasi Klien**:
+Dari daftar **Kelola Aplikasi Klien** (`/admin/clients`):
 
 | Aksi | Efek |
 |---|---|
-| **Edit** | Ubah nama, redirect URIs, back-channel/front-channel URI, trusted |
-| **Regenerate Secret** | Secret baru dibuat & ditampilkan sekali; **secret lama hangus** — aplikasi klien wajib update `.env`-nya |
-| **Revoke** | Client dinonaktifkan (soft delete `revoked=1`) dan **seluruh token-nya dicabut**. Redirect/token dari client ini akan ditolak |
+| **Edit** | Ubah nama, redirect URIs, landing URL, back-channel/front-channel URI, trusted. Perubahan langsung berlaku |
+| **Regenerate Secret** | Secret baru dibuat & ditampilkan **sekali**; **secret lama langsung hangus** — aplikasi klien wajib update `.env`-nya |
+| **Revoke** | Client dinonaktifkan (`revoked=1`), **seluruh access & refresh token-nya dicabut**, dan back-channel tidak lagi dikirim. Redirect/token dari client ini akan ditolak |
+
+Catatan saat mengubah client yang sudah berjalan:
+
+- Menambah/mengubah `redirect_uris` **tidak** memutus sesi yang sedang aktif, tetapi
+  `post_logout_redirect_uri` lama langsung tidak valid.
+- Mengubah `backchannel_logout_uri` aman: job yang masih di queue akan **skip** bila
+  URI-nya sudah berbeda (mencegah token dikirim ke endpoint lama).
+- Client yang sudah di-revoke tidak bisa "diaktifkan" lewat Edit — daftarkan client baru
+  lalu perbarui `.env` aplikasi klien.
 
 ---
 
 ## 🔌 Integrasi Aplikasi Klien Laravel 12 (Tanpa Socialite)
 
 Aplikasi klien **tidak perlu** menggunakan Laravel Socialite. Integrasi dibangun sendiri dengan `Illuminate\Support\Facades\Http` untuk menangani **Authorization Code + PKCE S256**, pertukaran token, validasi, refresh token, serta **Single Logout via Back-Channel**.
+
+> **Dependency yang wajib dipasang:** `firebase/php-jwt` + `guzzlehttp/guzzle`
+> (dan `SESSION_DRIVER=database`). Daftar lengkap & perintah install ada di
+> [Langkah 0 — Dependency Aplikasi Klien](#langkah-0--dependency-aplikasi-klien).
 
 ### 1. Tambahkan Variabel `.env` Klien
 
@@ -1033,23 +1384,29 @@ class User extends Authenticatable
 
 Agar aplikasi klien dikenali IdP, **registrasikan client-nya lewat Panel Admin** —
 lihat [Cara Menambahkan / Membuat Aplikasi Klien Baru](#-cara-menambahkan--membuat-aplikasi-klien-baru).
-Alternatif (untuk seeding otomatis), daftarkan langsung di tabel `oauth_clients`:
+Registrasi lewat **Seeder/Tinker** beserta tabel kolom `oauth_clients` ada di
+[Registrasi Tanpa Panel Admin](#registrasi-tanpa-panel-admin-seeder--tinker).
 
-| Kolom | Nilai | Keterangan |
-| --- | --- | --- |
-| `name` | `Nama Aplikasi Klien` | Nama yang ditampilkan di halaman consent IdP |
-| `redirect_uris` | `["http://localhost:8010/auth/callback", "http://localhost:8010/goodbye"]` | Wajib sesuai dengan `SSO_REDIRECT_URI` & `SSO_POST_LOGOUT_URI` |
-| `trusted` | `1` | Opsional, jika `1` halaman consent akan otomatis di-skip |
-| `backchannel_logout_uri` | `http://localhost:8010/sso/backchannel-logout` | **Wajib** agar IdP mengirim logout token saat SLO |
-| `revoked` | `0` | Pastikan client aktif |
+Dua hal yang mudah terlewat setelah client terdaftar:
+
+1. **CSP IdP** — tambahkan origin aplikasi klien ke `SSO_FORM_ACTION_ORIGINS`
+   (lihat [Langkah 7](#langkah-7--izinkan-origin-aplikasi-pada-csp-idp)).
+   Tanpa ini login berhasil di curl tetapi **diblokir di browser**.
+2. **Kontrak back-channel** — endpoint harus membalas `2xx`, bebas CSRF, dan
+   memverifikasi `iss`/`aud`/`events`/`exp`/`jti` (lihat
+   [Kontrak Endpoint Back-Channel Logout](#kontrak-endpoint-back-channel-logout)).
 
 ### Quick Checklist Integrasi
 
-- [ ] **Dependency**: `composer require firebase/php-jwt`
+- [ ] **Dependency**: `composer require firebase/php-jwt:^6.10 guzzlehttp/guzzle:^7.8` (wajib); `laravel/passport` **tidak** dipakai di klien
+- [ ] **Ekstensi PHP**: `openssl`, `curl`, `mbstring`, `json`, `fileinfo`, `pdo` (+ driver DB)
 - [ ] **File wajib**: `config/sso.php`, `app/Services/SsoClient.php`, `app/Services/LogoutTokenVerifier.php`, `app/Http/Middleware/SsoAuthenticate.php`, `app/Http/Controllers/Auth/AuthController.php`, `app/Http/Controllers/Auth/BackChannelLogoutController.php`
 - [ ] **Bootstrap**: Register middleware alias `sso` dan tambahkan `sso/backchannel-logout` ke `validateCsrfTokens(except: [])`
 - [ ] **Database**: Tambah kolom `sso_sub`, `nip` ke tabel `users` & ubah `password` jadi nullable. Gunakan `SESSION_DRIVER=database`
 - [ ] **IdP**: Daftarkan client dengan `redirect_uris` dan `backchannel_logout_uri` yang benar
+- [ ] **IdP**: Tambahkan origin aplikasi ke `SSO_FORM_ACTION_ORIGINS` lalu `php artisan config:clear`
+- [ ] **JWKS**: Cache `/oauth/jwks` + stale fallback (dan prewarm saat login) agar SLO tidak deadlock di dev server
 - [ ] **Uji alur**: Akses route terproteksi → redirect ke IdP → login → callback kembali ke aplikasi klien
 - [ ] **Uji logout lokal**: tombol "Keluar (Aplikasi Ini)" → sesi klien berakhir, redirect ke dashboard IdP, sesi IdP tetap aktif
 - [ ] **Uji SLO**: tombol "Logout Semua (SSO)" → IdP melakukan global logout & mengirim back-channel ke klien → seluruh sesi klien terhancurkan otomatis
+- [ ] **Uji audit**: `sso_logout_audit.status = delivered` & `http_status = 200` untuk client tersebut

@@ -16,14 +16,27 @@ class SecurityHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
         $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+        // Origin aplikasi client yang boleh menjadi tujuan akhir submit form
+        // login (mis. http://localhost:8001). Diambil dari konfigurasi.
+        $allowedFormOrigins = collect(config('sso.form_action_origins', []))
+            ->filter()
+            ->map(fn ($origin) => rtrim(trim((string) $origin), '/'))
+            ->unique()
+            ->implode(' ');
+
         $response->headers->set('Content-Security-Policy', implode('; ', [
             "default-src 'self'",
             "script-src 'self' 'unsafe-inline'",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data:",
             "connect-src 'self'",
-            "form-action 'self'",
-            "frame-ancestors 'none'",            "base-uri 'self'",
+            // Chrome menerapkan form-action pada SELURUH rantai redirect hasil
+            // submit form, sehingga origin aplikasi client (yang menjadi tujuan
+            // akhir redirect) harus ikut diizinkan. Tanpa ini, login SSO diblokir.
+            "form-action 'self'".($allowedFormOrigins !== '' ? ' '.$allowedFormOrigins : ''),
+            "frame-ancestors 'none'",
+            "base-uri 'self'",
         ]));
 
         // HSTS hanya saat HTTPS aktif

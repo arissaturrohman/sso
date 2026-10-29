@@ -291,10 +291,6 @@ class SloService
             throw new \InvalidArgumentException('Back-channel URI harus http/https.');
         }
 
-        if ($scheme !== 'https' && ! $this->isLoopbackHost($host)) {
-            throw new \InvalidArgumentException('Back-channel URI wajib HTTPS.');
-        }
-
         $ips = $this->resolveHost($host);
 
         if ($ips === []) {
@@ -307,6 +303,17 @@ class SloService
             }
 
             throw new \InvalidArgumentException('Back-channel URI mengarah ke alamat privat/reserved.');
+        }
+
+        // HTTP hanya diizinkan untuk loopback. Di local/testing host dev seperti
+        // `http://rup-app.test` (hosts -> 127.0.0.1) juga diterima agar SLO bisa
+        // diuji tanpa HTTPS; di produksi aturan HTTPS tetap mutlak.
+        if ($scheme !== 'https' && ! $this->isLoopbackHost($host)) {
+            $allLoopback = collect($ips)->every(fn (string $ip): bool => $this->isLoopbackHost($ip));
+
+            if (! $allLoopback || ! app()->environment(['local', 'testing'])) {
+                throw new \InvalidArgumentException('Back-channel URI wajib HTTPS.');
+            }
         }
     }
 
