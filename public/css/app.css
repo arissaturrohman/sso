@@ -1621,6 +1621,22 @@ code {
     font-size: 12px;
 }
 
+.site-footer__links {
+    display: flex;
+    gap: 16px;
+}
+
+.site-footer__links a {
+    color: var(--muted);
+    text-decoration: none;
+}
+
+.site-footer__links a:hover,
+.site-footer__links a:focus-visible {
+    color: var(--primary);
+    text-decoration: underline;
+}
+
 /* ---------- Drawer overlay ---------- */
 .drawer-overlay {
     position: fixed;

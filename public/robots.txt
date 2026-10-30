@@ -1,2 +1,41 @@
+# SSO Identity Provider — UKPBJ Demak
+# https://sso.ukpbj.demakkab.go.id
+#
+# Kebijakan: hanya halaman publik "/" dan "/login" yang boleh diindeks.
+#
+# - Googlebot & Bingbot TIDAK diblokir (hanya ada aturan User-agent: *).
+# - Tidak ada "Disallow: /" global — itu akan memblokir seluruh situs.
+# - Sesuai RFC 9309, match TERPANJANG menang, sehingga "Allow: /"
+#   tidak menimpa "Disallow: /dashboard" dan seterusnya.
+
 User-agent: *
-Disallow:
+
+# --- Halaman publik (boleh diindeks) ---
+Allow: /
+Allow: /login
+Allow: /forgot-password        # disiapkan untuk masa depan; route belum ada
+
+# --- Area privat / teknis (jangan diindeks) ---
+# Catatan: /admin TANPA slash agar "/admin" dan "/admin/..." sama-sama cocok.
+Disallow: /dashboard
+Disallow: /oauth/
+Disallow: /admin
+Disallow: /api/
+Disallow: /sso/
+Disallow: /user/
+Disallow: /settings
+Disallow: /sessions
+Disallow: /password/
+Disallow: /logout
+Disallow: /up
+
+# --- Query string sensitif (kode & token OAuth 2.0) ---
+# Blok robots mencegah CRAWL, bukan indeks; URL yang telanjur terindeks
+# dinetralkan oleh <link rel="canonical"> di tiap halaman.
+Disallow: /*?token=
+Disallow: /*&token=
+Disallow: /*?code=
+Disallow: /*&code=
+
+# --- Peta situs (hanya halaman publik; hasil artisan sitemap:generate) ---
+Sitemap: https://sso.ukpbj.demakkab.go.id/sitemap.xml

@@ -3,8 +3,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>@yield('title', 'SSO Identity Provider') — {{ config('app.name') }}</title>
-    <link rel="icon" href="data:,">
+    {{-- Meta SEO lengkap (title, description, canonical, robots, OG, JSON-LD)
+         dihitung per-route oleh App\Http\Middleware\SeoMeta --}}
+    @include('partials.seo-head')
     @php
         $assetVersion = file_exists(public_path('css/app.css')) ? filemtime(public_path('css/app.css')) : '1';
     @endphp
@@ -126,6 +127,10 @@
 <footer class="site-footer">
     <div class="site-footer__inner">
         <span>&copy; {{ date('Y') }} {{ config('app.name') }}</span>
+        <nav class="site-footer__links" aria-label="Tautan situs">
+            <a href="{{ url('/') }}">Beranda</a>
+            <a href="{{ route('login') }}">Login Terpadu</a>
+        </nav>
         <span>OAuth 2.0 &middot; OpenID Connect Identity Provider</span>
     </div>
 </footer>
