@@ -107,8 +107,9 @@ php artisan serve --port=8000                        # dev saja; produksi pakai 
    semua token & sesi dicabut, IdP mengirim back-channel ke setiap aplikasi klien
 
 > Folder demo-client (aplikasi SP contoh) beserta script test E2E sudah dihapus
-> dari repo ini. Panduan integrasi aplikasi klien tetap tersedia di bawah —
-> contoh alur di sana menggunakan port 8010 sebagai ilustrasi.
+> dari repo ini. Panduan integrasi aplikasi klien tetap tersedia di bawah.
+> Untuk contoh nyata yang sudah berjalan di lokal (port 8001), lihat
+> [Contoh Nyata: SIM-UKPBJ](#contoh-nyata-sim-ukpbj-arjuna).
 
 ---
 
@@ -549,6 +550,10 @@ SSO_REDIRECT_URI=https://simdesa.ukpbj.demakkab.go.id/auth/callback
 SSO_POST_LOGOUT_URI=https://simdesa.ukpbj.demakkab.go.id/goodbye
 ```
 
+> Nama variabel mengikuti kode aplikasi klien. SIM-UKPBJ memakai
+> `SSO_LOGOUT_URI` untuk tujuan `post_logout_redirect_uri`; pastikan nilainya
+> terdaftar di `redirect_uris` client.
+
 ### Langkah 6 — Penuhi Kontrak Teknis IdP
 
 Registrasi saja belum cukup: aplikasi klien harus berperilaku sesuai kontrak berikut.
@@ -602,7 +607,7 @@ Content-Security-Policy: ...; form-action 'self' https://simdesa.ukpbj.demakkab.
 | 2 | Login di IdP | Kembali ke callback klien → sesi klien aktif, user langsung masuk aplikasi |
 | 3 | Buka aplikasi klien lagi saat sesi IdP masih hidup | Tidak diminta password lagi |
 | 4 | Tunggu > 15 menit lalu gunakan aplikasi | Access token di-refresh otomatis (`grant_type=refresh_token`), user tidak terganggu |
-| 5 | Logout lokal (opsional) | Sesi klien berakhir, diarahkan ke IdP, **sesi IdP tetap aktif** |
+| 5 | Logout lokal (opsional) | Sesi klien berakhir. Jangan panggil `/sso/logout` bila ingin **sesi IdP tetap aktif**; endpoint itu melakukan SLO |
 | 6 | Logout SSO / SLO | IdP mencabut semua token & sesi, mengirim back-channel ke aplikasi klien |
 | 7 | Cek `sso_logout_audit` di IdP | `status = delivered`, `http_status = 200` untuk client tersebut |
 | 8 | Setelah SLO, buka aplikasi klien lagi | Diminta login ulang (sesi klien benar-benar hancur) |
@@ -718,7 +723,7 @@ Kolom penting pada tabel `oauth_clients`:
 | Kolom | Nilai | Keterangan |
 | --- | --- | --- |
 | `name` | `Nama Aplikasi Klien` | Nama yang ditampilkan di halaman consent IdP |
-| `redirect_uris` | `["https://app/auth/callback", "https://app/"]` | JSON array; wajib sesuai `SSO_REDIRECT_URI` & `SSO_POST_LOGOUT_URI` |
+| `redirect_uris` | `["https://app/auth/callback", "https://app/"]` | JSON array; wajib sesuai `SSO_REDIRECT_URI` & URI post-logout (`SSO_POST_LOGOUT_URI`, atau `SSO_LOGOUT_URI` di SIM-UKPBJ) |
 | `trusted` | `1` | Opsional, jika `1` halaman consent otomatis di-skip |
 | `landing_url` | `https://app/` | Opsional, memunculkan kartu di dashboard user IdP |
 | `backchannel_logout_uri` | `https://app/sso/backchannel-logout` | **Wajib** agar IdP mengirim logout token saat SLO |
@@ -752,20 +757,103 @@ Kolom penting pada tabel `oauth_clients`:
 Integrasi nyata yang sudah berjalan: **SIM-UKPBJ / ARJUNA** (aplikasi Filament
 terpisah) — memakai access token + `/oauth/userinfo`, PKCE S256, dan back-channel logout.
 
+#### Nilai yang dipakai
+
 | Item | Nilai |
 |---|---|
-| IdP | `http://localhost:8000` (dev) |
+| IdP lokal | `http://localhost:8000` |
 | Aplikasi klien | `http://localhost:8001` (panel Filament `/admin`) |
+| Client ID | `01a185a8-1769-71b8-ad00-1bda2f83100d` |
 | Redirect URI (callback) | `http://localhost:8001/sso/callback` |
 | Post-logout URI | `http://localhost:8001/` |
 | Back-Channel Logout URI | `http://localhost:8001/sso/backchannel-logout` |
+| Landing URL (kartu dashboard) | `http://localhost:8001/sso/login` |
 | Trusted | `1` (tanpa halaman consent) |
 | Cek SLO | `sso_logout_audit` → `delivered` / HTTP 200 |
 
-Alur yang dipakai: root `/` tidak menampilkan halaman perantara — sudah login langsung
-`/admin`, belum login langsung memulai SSO. Logout panel (`POST /admin/logout`)
-diteruskan ke `/sso/logout` IdP (RP-initiated SLO) sehingga sesi IdP + aplikasi lain ikut
-berakhir.
+#### Konfigurasi client di IdP
+
+Daftarkan lewat `/admin/clients/create` (atau edit client yang sudah ada):
+
+| Field | Nilai |
+|---|---|
+| Nama Aplikasi | `SIM-UKPBJ` |
+| Redirect URIs | `http://localhost:8001/sso/callback` dan `http://localhost:8001/` |
+| Landing URL | `http://localhost:8001/sso/login` |
+| Back-Channel Logout URI | `http://localhost:8001/sso/backchannel-logout` |
+| Trusted | dicentang |
+
+> `http://localhost:8001/` **wajib** ada di `redirect_uris` karena dipakai sebagai
+> `post_logout_redirect_uri`. Tanpa itu, `/sso/logout` akan menjawab
+> `400 Permintaan logout tidak valid.`
+
+#### `.env` aplikasi klien
+
+```env
+APP_URL=http://localhost:8001
+
+SSO_URL=http://localhost:8000
+SSO_ISSUER=http://localhost:8000
+SSO_CLIENT_ID=01a185a8-1769-71b8-ad00-1bda2f83100d
+SSO_CLIENT_SECRET=<secret dari panel IdP>
+SSO_REDIRECT_URI=http://localhost:8001/sso/callback
+SSO_LOGOUT_URI=http://localhost:8001/
+SSO_ENABLED=true
+```
+
+> SIM-UKPBJ memakai nama variabel **`SSO_LOGOUT_URI`** (dibaca `config/sso.php`
+> aplikasi klien). Contoh generik di README ini memakai `SSO_POST_LOGOUT_URI`;
+> sesuaikan dengan nama variabel yang benar-benar dibaca kode klien.
+
+Tambahkan juga origin klien ke `.env` IdP agar CSP `form-action` tidak memblokir
+login di browser:
+
+```env
+# sesuaikan dengan origin client lain yang juga aktif
+SSO_FORM_ACTION_ORIGINS=http://localhost:8001,http://rup-app.test
+```
+
+Lalu bersihkan cache konfigurasi IdP:
+
+```bash
+php artisan config:clear
+```
+
+#### Menjalankan lokal
+
+```powershell
+# Terminal 1 — IdP
+cd D:\laragon\www\sso
+php artisan serve --host=127.0.0.1 --port=8000
+
+# Terminal 2 — SIM-UKPBJ
+cd D:\laragon\www\sim-ukpbj
+php artisan serve --host=127.0.0.1 --port=8001
+```
+
+Login IdP: `admin@sso.test` / `password123`.
+
+#### Alur yang sudah diverifikasi
+
+| # | Uji | Hasil |
+|---|---|---|
+| 1 | `GET http://localhost:8001/` | `200`, landing page tampil |
+| 2 | `GET http://localhost:8001/admin` tanpa login | `302` → `/admin/login` |
+| 3 | `GET http://localhost:8001/sso/login` | `302` → IdP `/oauth/authorize` |
+| 4 | Login IdP + callback | `200` → `/admin` |
+| 5 | `GET http://localhost:8001/sso/logout` | `302` → IdP `/sso/logout` → `http://localhost:8001/` |
+| 6 | Logout dari dashboard IdP | Back-channel menghapus sesi SIM; `/admin` → login |
+
+#### Catatan perilaku logout
+
+- **`GET /sso/logout`** adalah RP-initiated SLO: sesi SIM dihapus, lalu browser
+  diarahkan ke IdP `/sso/logout`. IdP menghapus sesi IdP dan mengirim back-channel
+  ke semua client, jadi aplikasi SSO lain juga ikut logout.
+- **`POST /admin/logout`** (tombol logout panel Filament) hanya menghapus sesi
+  lokal Filament; tidak otomatis memanggil `/sso/logout`. Bila ingin tombol panel
+  memicu SLO, tambahkan redirect khusus setelah logout ke `route('sso.logout')`.
+- Untuk logout lokal tanpa menyentuh IdP, jangan arahkan browser ke `/sso/logout`;
+  cukup `Auth::logout()` + `session()->invalidate()` lalu redirect ke halaman lokal.
 
 ### Aplikasi di Dashboard User
 
@@ -808,7 +896,7 @@ Catatan saat mengubah client yang sudah berjalan:
 
 ## 🔌 Integrasi Aplikasi Klien Laravel 12 (Tanpa Socialite)
 
-Aplikasi klien **tidak perlu** menggunakan Laravel Socialite. Integrasi dibangun sendiri dengan `Illuminate\Support\Facades\Http` untuk menangani **Authorization Code + PKCE S256**, pertukaran token, validasi, refresh token, serta **Single Logout via Back-Channel**.
+Aplikasi klien **tidak perlu** menggunakan Laravel Socialite. Integrasi dibangun sendiri — SIM-UKPBJ memakai **Guzzle** (`guzzlehttp/guzzle`), aplikasi lain bisa memakai `Illuminate\Support\Facades\Http` — untuk menangani **Authorization Code + PKCE S256**, pertukaran token, validasi, refresh token, serta **Single Logout via Back-Channel**.
 
 > **Dependency yang wajib dipasang:** `firebase/php-jwt` + `guzzlehttp/guzzle`
 > (dan `SESSION_DRIVER=database`). Daftar lengkap & perintah install ada di
@@ -816,471 +904,1101 @@ Aplikasi klien **tidak perlu** menggunakan Laravel Socialite. Integrasi dibangun
 
 ### 1. Tambahkan Variabel `.env` Klien
 
-Tambahkan konfigurasi berikut ke file `.env` aplikasi Laravel klien kamu:
+Contoh berikut mengikuti implementasi nyata **SIM-UKPBJ**. Nama variabel di aplikasi
+klien lain bisa berbeda — sesuaikan dengan yang benar-benar dibaca `config/sso.php`.
 
 ```env
-SSO_ISSUER=https://sso.ukpbj.demakkab.go.id
-SSO_CLIENT_ID=01a1803a-470d-72a4-a0cd-e057e6fe41d4
-SSO_CLIENT_SECRET=dU2MqR44CMIJgAIWQaIYachoTVU4khFWC90WxI41
-SSO_REDIRECT_URI=http://localhost:8010/auth/callback
-SSO_POST_LOGOUT_URI=http://localhost:8010/goodbye
-SSO_SCOPES=*
+APP_URL=http://localhost:8001
+
+SSO_URL=http://localhost:8000
+SSO_ISSUER=http://localhost:8000
+SSO_CLIENT_ID=01a185a8-1769-71b8-ad00-1bda2f83100d
+SSO_CLIENT_SECRET=<secret dari panel IdP>
+SSO_REDIRECT_URI=http://localhost:8001/sso/callback
+SSO_LOGOUT_URI=http://localhost:8001/
+SSO_ENABLED=true
+
+# Opsional
+# SSO_HTTP_TIMEOUT=15
+# SSO_CONNECT_TIMEOUT=5
+# SSO_VERIFY_SSL=true
+# SSO_JWKS_URI=http://localhost:8000/oauth/jwks
+# SSO_LOGOUT_TOKEN_LEEWAY=60
+# SSO_JTI_CACHE_STORE=database
 ```
 
-> Untuk lingkungan produksi, ganti URL ke HTTPS, gunakan secret yang berbeda, dan **jangan pernah** commit `SSO_CLIENT_SECRET` ke repository.
+> **Perbedaan nama variabel:** SIM-UKPBJ memakai **`SSO_LOGOUT_URI`** untuk tujuan
+> `post_logout_redirect_uri`. Sebagian contoh/integrasi lain memakai
+> **`SSO_POST_LOGOUT_URI`**. Yang penting: nilai URI harus **sama persis** dengan
+> salah satu entri `redirect_uris` client di IdP.
+>
+> Untuk produksi, ganti URL ke HTTPS, gunakan secret berbeda per aplikasi, dan
+> **jangan pernah** commit `SSO_CLIENT_SECRET` ke repository.
 
 ### 2. Buat File Konfigurasi `config/sso.php`
 
-Buat file `config/sso.php` untuk memusatkan seluruh endpoint dan kredensial IdP.
+File ini memusatkan endpoint IdP, kredensial OAuth, dan pengaturan logout token.
+Semua endpoint diturunkan dari `url`/`issuer` agar tidak ada URL yang tercecer.
 
 ```php
 <?php
 
 return [
-    // Identitas IdP
-    'issuer' => env('SSO_ISSUER', 'https://sso.ukpbj.demakkab.go.id'),
-    'authorize_endpoint' => env('SSO_ISSUER', 'https://sso.ukpbj.demakkab.go.id').'/oauth/authorize',
-    'token_endpoint' => env('SSO_ISSUER', 'https://sso.ukpbj.demakkab.go.id').'/oauth/token',
-    'userinfo_endpoint' => env('SSO_ISSUER', 'https://sso.ukpbj.demakkab.go.id').'/oauth/userinfo',
-    'revoke_endpoint' => env('SSO_ISSUER', 'https://sso.ukpbj.demakkab.go.id').'/oauth/revoke',
-    'jwks_endpoint' => env('SSO_ISSUER', 'https://sso.ukpbj.demakkab.go.id').'/oauth/jwks',
-    'logout_endpoint' => env('SSO_ISSUER', 'https://sso.ukpbj.demakkab.go.id').'/sso/logout',
-    // Dashboard IdP — tujuan setelah logout lokal aplikasi klien
-    'dashboard_endpoint' => env('SSO_ISSUER', 'https://sso.ukpbj.demakkab.go.id').'/dashboard',
+    // Base URL IdP. Endpoint /oauth/* dan /sso/logout diturunkan dari sini.
+    'url' => env('SSO_URL', 'https://sso.ukpbj.demakkab.go.id'),
 
-    // Kredensial OAuth Client (Service Provider)
+    // Harus sama persis dengan APP_URL IdP. Dipakai memvalidasi klaim `iss`
+    // pada logout token back-channel.
+    'issuer' => rtrim((string) env('SSO_ISSUER', env('SSO_URL', 'https://sso.ukpbj.demakkab.go.id')), '/'),
+
+    // HTTP client
+    'http_timeout' => (int) env('SSO_HTTP_TIMEOUT', 15),
+    'connect_timeout' => (int) env('SSO_CONNECT_TIMEOUT', 5),
+    'verify_ssl' => (bool) env('SSO_VERIFY_SSL', true),
+
+    // Kredensial OAuth client (Service Provider)
     'client_id' => env('SSO_CLIENT_ID'),
     'client_secret' => env('SSO_CLIENT_SECRET'),
-    'redirect_uri' => env('SSO_REDIRECT_URI'),
-    'post_logout_redirect_uri' => env('SSO_POST_LOGOUT_URI'),
+    'redirect_uri' => env('SSO_REDIRECT_URI', 'http://localhost:8001/sso/callback'),
 
-    // Scope yang diminta ke IdP
-    'scopes' => env('SSO_SCOPES', '*'),
+    // Tujuan setelah RP-initiated logout. WAJIB terdaftar di redirect_uris IdP.
+    'logout_uri' => env('SSO_LOGOUT_URI', 'http://localhost:8001/'),
 
-    // TTL cache validasi token ke /oauth/userinfo (dalam detik)
-    // Semakin kecil = lebih responsif saat revoke SLO, semakin besar = lebih ringan ke IdP
-    'token_cache_ttl' => 30,
+    'enabled' => env('SSO_ENABLED', true),
+    'prefix' => 'sso',
+    'middleware' => ['web'],
+    'guard' => 'web',
+
+    // OIDC Back-Channel Logout
+    'logout_token' => [
+        'leeway' => (int) env('SSO_LOGOUT_TOKEN_LEEWAY', 60),
+
+        // null = gunakan {issuer}/oauth/jwks
+        'jwks_uri' => env('SSO_JWKS_URI'),
+
+        // null = gunakan cache store default aplikasi
+        'jti_store' => env('SSO_JTI_CACHE_STORE'),
+    ],
+
+    'session' => [
+        'key_prefix' => 'sso_',
+        'lifetime' => 120,
+        'expire_on_close' => true,
+    ],
 ];
 ```
 
-### 3. Buat Service `app/Services/SsoClient.php`
+> File `config/sso.php` SIM-UKPBJ juga memuat `user_mapping`, `required_claims`,
+> dan `token_validation`. Ketiganya dokumentasi/opsi tambahan; kode SSO utama
+> memakai `url`, `issuer`, kredensial, `redirect_uri`, `logout_uri`, dan
+> `logout_token` di atas.
 
-Service ini bertanggung jawab untuk generate PKCE, redirect ke IdP, tukar `authorization code`, refresh token, validasi token, serta revoke token saat logout.
+### 3. Buat Service `app/Services/SsoClientService.php`
+
+Service ini menangani PKCE S256, tukar `authorization code`, refresh token,
+pengambilan profil dari `/oauth/userinfo`, validasi sesi, dan pembuatan URL
+RP-initiated logout. Implementasi SIM-UKPBJ memakai **Guzzle** dan menyimpan
+token di session.
+
+Method utama:
+
+| Method | Kegunaan |
+|---|---|
+| `getAuthorizationUrl()` | Buat URL `/oauth/authorize` + `state` + PKCE S256 |
+| `exchangeCodeForTokens($code, $state)` | Validasi `state`, tukar code, simpan token |
+| `getUserInfo()` | Ambil profil; refresh otomatis sekali bila access token `401` |
+| `refreshToken()` | Refresh token rotation, simpan token baru |
+| `validateSession()` | Cek sesi masih valid lewat UserInfo |
+| `logoutUrl()` | URL `/sso/logout` + `post_logout_redirect_uri` + `state` |
 
 ```php
 <?php
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
+use GuzzleHttp\Client;
+use GuzzleHttp\Exception\GuzzleException;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
+use RuntimeException;
+use Throwable;
 
-class SsoClient
+class SsoClientService
 {
-    /**
-     * Generate URL ke Authorization Endpoint IdP dengan PKCE S256
-     */
-    public function redirectUrl(): string
-    {
-        $verifier = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-        $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
-        $state = rtrim(strtr(base64_encode(random_bytes(16)), '+/', '-_'), '=');
+    protected Client $client;
 
-        Session::put('sso_code_verifier', $verifier);
+    protected string $ssoUrl;
+
+    protected string $clientId;
+
+    protected string $clientSecret;
+
+    protected string $redirectUri;
+
+    protected string $logoutUri;
+
+    public function __construct()
+    {
+        $this->ssoUrl = rtrim((string) config('sso.url'), '/');
+        $this->clientId = (string) config('sso.client_id');
+        $this->clientSecret = (string) config('sso.client_secret');
+        $this->redirectUri = (string) config('sso.redirect_uri');
+        $this->logoutUri = (string) config('sso.logout_uri');
+
+        $this->client = new Client([
+            'timeout' => (int) config('sso.http_timeout', 15),
+            'connect_timeout' => (int) config('sso.connect_timeout', 5),
+            'verify' => (bool) config('sso.verify_ssl', true),
+            'http_errors' => false,
+        ]);
+    }
+
+    /**
+     * Bangun URL authorization OAuth 2.0 + PKCE S256.
+     */
+    public function getAuthorizationUrl(): string
+    {
+        $this->ensureConfigured();
+
+        $state = bin2hex(random_bytes(16));
+        $codeVerifier = bin2hex(random_bytes(32));
+        $codeChallenge = rtrim(strtr(base64_encode(hash('sha256', $codeVerifier, true)), '+/', '-_'), '=');
+
         Session::put('sso_state', $state);
+        Session::put('sso_code_verifier', $codeVerifier);
+        Session::put('sso_authorization_started_at', time());
 
-        return config('sso.authorize_endpoint').'?'.http_build_query([
+        $params = [
             'response_type' => 'code',
-            'client_id' => config('sso.client_id'),
-            'redirect_uri' => config('sso.redirect_uri'),
-            'scope' => config('sso.scopes'),
+            'client_id' => $this->clientId,
+            'redirect_uri' => $this->redirectUri,
+            'scope' => 'openid profile email',
             'state' => $state,
-            'code_challenge' => $challenge,
+            'code_challenge' => $codeChallenge,
             'code_challenge_method' => 'S256',
-        ]);
+        ];
+
+        return $this->ssoUrl.'/oauth/authorize?'.http_build_query($params, '', '&', PHP_QUERY_RFC3986);
     }
 
     /**
-     * Tukar authorization code + code_verifier menjadi access_token & refresh_token
+     * Tukar authorization code dengan access token.
      */
-    public function exchangeCode(string $code): array
+    public function exchangeCodeForTokens(string $code, string $state): array
     {
-        $response = Http::asForm()->timeout(10)->post(config('sso.token_endpoint'), [
+        $this->ensureConfigured();
+
+        $sessionState = Session::pull('sso_state');
+        $codeVerifier = Session::pull('sso_code_verifier');
+
+        if (! is_string($sessionState) || $sessionState === '' || ! hash_equals($sessionState, $state)) {
+            throw new RuntimeException('State OAuth tidak valid atau sudah kedaluwarsa.');
+        }
+
+        if (! is_string($codeVerifier) || $codeVerifier === '') {
+            throw new RuntimeException('PKCE code verifier tidak ditemukan di sesi.');
+        }
+
+        $tokens = $this->requestToken([
             'grant_type' => 'authorization_code',
-            'client_id' => config('sso.client_id'),
-            'client_secret' => config('sso.client_secret'),
-            'redirect_uri' => config('sso.redirect_uri'),
+            'client_id' => $this->clientId,
+            'client_secret' => $this->clientSecret,
+            'redirect_uri' => $this->redirectUri,
             'code' => $code,
-            'code_verifier' => Session::pull('sso_code_verifier'),
+            'code_verifier' => $codeVerifier,
         ]);
 
-        return $response->throw()->json();
+        $this->storeTokens($tokens);
+
+        return $tokens;
     }
 
     /**
-     * Refresh access token menggunakan refresh token
-     * (IdP akan melakukan refresh token rotation)
+     * Refresh access token memakai refresh token yang tersimpan di sesi.
      */
-    public function refresh(string $refreshToken): ?array
+    public function refreshToken(): array
     {
-        $response = Http::asForm()->timeout(10)->post(config('sso.token_endpoint'), [
+        $this->ensureConfigured();
+
+        $refreshToken = Session::get('sso_refresh_token');
+
+        if (! is_string($refreshToken) || $refreshToken === '') {
+            throw new RuntimeException('Refresh token SSO tidak tersedia.');
+        }
+
+        $tokens = $this->requestToken([
             'grant_type' => 'refresh_token',
-            'client_id' => config('sso.client_id'),
-            'client_secret' => config('sso.client_secret'),
+            'client_id' => $this->clientId,
+            'client_secret' => $this->clientSecret,
             'refresh_token' => $refreshToken,
         ]);
 
-        return $response->status() === 200 ? $response->json() : null;
+        $this->storeTokens($tokens, true);
+
+        return $tokens;
     }
 
     /**
-     * Validasi access token via /oauth/userinfo dengan caching
+     * Ambil profil user dari endpoint OIDC UserInfo.
      */
-    public function validateToken(string $accessToken): ?array
+    public function getUserInfo(): array
     {
-        $cacheKey = 'sso_token_'.hash('sha256', $accessToken);
-
-        $cached = Cache::get($cacheKey);
-        if ($cached === 'revoked') {
-            return null;
-        }
-        if (is_array($cached)) {
-            return $cached;
-        }
+        $accessToken = $this->getValidAccessToken();
 
         try {
-            $res = Http::withToken($accessToken)->acceptJson()->timeout(5)->get(config('sso.userinfo_endpoint'));
-
-            if ($res->status() === 401) {
-                Cache::put($cacheKey, 'revoked', config('sso.token_cache_ttl'));
-                return null;
+            return $this->requestUserInfo($accessToken);
+        } catch (RuntimeException $e) {
+            // Access token bisa saja dicabut lebih awal (mis. logout global).
+            // Coba sekali dengan refresh token, lalu ulangi.
+            if ($e->getCode() !== 401) {
+                throw $e;
             }
 
-            $user = $res->throw()->json();
-            Cache::put($cacheKey, $user, config('sso.token_cache_ttl'));
-            return $user;
-        } catch (\Throwable) {
-            return null;
+            $this->refreshToken();
+
+            return $this->requestUserInfo($this->getValidAccessToken());
         }
     }
 
     /**
-     * Revoke token di IdP dan bersihkan session klien
+     * URL logout RP-initiated ke IdP.
      */
-    public function revokeAndForget(): void
+    public function logoutUrl(): string
     {
-        if ($accessToken = Session::get('sso_access_token')) {
-            try {
-                Http::asForm()->timeout(5)->post(config('sso.revoke_endpoint'), [
-                    'token' => $accessToken,
-                ]);
-            } catch (\Throwable) {
-                // Lanjutkan logout meski koneksi ke IdP gagal
+        $this->ensureConfigured();
+
+        $params = [
+            'client_id' => $this->clientId,
+            'post_logout_redirect_uri' => $this->logoutUri,
+            'state' => bin2hex(random_bytes(16)),
+        ];
+
+        return $this->ssoUrl.'/sso/logout?'.http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+    }
+
+    /**
+     * Cek apakah sesi SSO masih valid (access token dapat dipakai ke UserInfo).
+     */
+    public function validateSession(): bool
+    {
+        try {
+            $this->getUserInfo();
+
+            return true;
+        } catch (Throwable $e) {
+            Log::warning('[SSO] Validasi sesi gagal', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
+    }
+
+    public function getConfig(): array
+    {
+        return [
+            'url' => $this->ssoUrl,
+            'issuer' => rtrim((string) config('sso.issuer', $this->ssoUrl), '/'),
+            'client_id' => $this->clientId,
+            'redirect_uri' => $this->redirectUri,
+            'logout_uri' => $this->logoutUri,
+        ];
+    }
+
+    protected function requestToken(array $params): array
+    {
+        try {
+            $response = $this->client->post($this->ssoUrl.'/oauth/token', [
+                'form_params' => $params,
+                'headers' => [
+                    'Accept' => 'application/json',
+                ],
+            ]);
+        } catch (GuzzleException $e) {
+            throw new RuntimeException('Tidak dapat menghubungi server SSO.', 0, $e);
+        }
+
+        $status = $response->getStatusCode();
+        $body = (string) $response->getBody();
+        $data = json_decode($body, true);
+
+        if ($status >= 400 || ! is_array($data)) {
+            $message = is_array($data)
+                ? (string) ($data['error_description'] ?? $data['error'] ?? 'Respons token tidak valid.')
+                : 'Respons token tidak valid.';
+
+            throw new RuntimeException('SSO menolak permintaan token: '.$message);
+        }
+
+        if (empty($data['access_token']) || ! is_string($data['access_token'])) {
+            throw new RuntimeException('Respons token SSO tidak mengandung access_token.');
+        }
+
+        return $data;
+    }
+
+    protected function requestUserInfo(string $accessToken): array
+    {
+        try {
+            $response = $this->client->get($this->ssoUrl.'/oauth/userinfo', [
+                'headers' => [
+                    'Authorization' => 'Bearer '.$accessToken,
+                    'Accept' => 'application/json',
+                ],
+            ]);
+        } catch (GuzzleException $e) {
+            throw new RuntimeException('Tidak dapat mengambil profil dari server SSO.', 0, $e);
+        }
+
+        $status = $response->getStatusCode();
+        $body = (string) $response->getBody();
+        $data = json_decode($body, true);
+
+        if ($status === 401) {
+            throw new RuntimeException('Access token SSO tidak valid atau sudah dicabut.', 401);
+        }
+
+        if ($status >= 400 || ! is_array($data)) {
+            throw new RuntimeException('Server SSO gagal mengembalikan profil user (HTTP '.$status.').');
+        }
+
+        if (empty($data['sub']) || ! is_scalar($data['sub'])) {
+            throw new RuntimeException('Profil SSO tidak mengandung klaim sub.');
+        }
+
+        return $data;
+    }
+
+    protected function storeTokens(array $tokens, bool $preserveRefreshToken = false): void
+    {
+        Session::put('sso_access_token', (string) $tokens['access_token']);
+
+        if (! empty($tokens['refresh_token']) && is_string($tokens['refresh_token'])) {
+            Session::put('sso_refresh_token', $tokens['refresh_token']);
+        } elseif (! $preserveRefreshToken) {
+            Session::forget('sso_refresh_token');
+        }
+
+        $expiresIn = max(30, (int) ($tokens['expires_in'] ?? 900));
+        Session::put('sso_expires_at', time() + $expiresIn);
+        Session::put('sso_token_type', (string) ($tokens['token_type'] ?? 'Bearer'));
+        Session::put('sso_last_validated_at', time());
+    }
+
+    protected function getValidAccessToken(): string
+    {
+        $accessToken = Session::get('sso_access_token');
+        $expiresAt = (int) Session::get('sso_expires_at', 0);
+
+        if (is_string($accessToken) && $accessToken !== '' && $expiresAt > (time() + 30)) {
+            return $accessToken;
+        }
+
+        if (is_string(Session::get('sso_refresh_token')) && Session::get('sso_refresh_token') !== '') {
+            $this->refreshToken();
+
+            $accessToken = Session::get('sso_access_token');
+
+            if (is_string($accessToken) && $accessToken !== '') {
+                return $accessToken;
             }
         }
 
-        Session::forget(['sso_access_token', 'sso_refresh_token', 'sso_user', 'sso_code_verifier', 'sso_state']);
+        throw new RuntimeException('Sesi SSO tidak tersedia. Silakan login ulang.');
     }
 
-    public static function flushTokenCache(string $accessToken): void
+    protected function ensureConfigured(): void
     {
-        Cache::forget('sso_token_'.hash('sha256', $accessToken));
+        if ($this->ssoUrl === ''
+            || $this->clientId === ''
+            || $this->clientSecret === ''
+            || $this->redirectUri === ''
+            || $this->logoutUri === '') {
+            throw new RuntimeException('Konfigurasi SSO belum lengkap. Periksa variabel SSO_* di .env.');
+        }
     }
 }
 ```
 
-### 4. Middleware `app/Http/Middleware/SsoAuthenticate.php`
+> Nama kelas di SIM-UKPBJ adalah **`SsoClientService`** (bukan `SsoClient`).
+> Sesuaikan `use App\Services\SsoClientService;` di controller dan middleware.
 
-Middleware ini melindungi route aplikasi klien. Jika token tidak ada/invalid, akan diarahkan ke login SSO, dan akan mencoba `refresh` otomatis sebelum memaksa login ulang.
+### 4. Middleware `app/Http/Middleware/SsoMiddleware.php`
+
+Middleware ini melindungi route aplikasi klien. Bila user sudah login lokal,
+middleware memvalidasi sesi SSO ke IdP paling sering **sekali per 60 detik**
+(`sso_last_validated_at`) agar tidak ada request UserInfo di setiap halaman.
+Bila sesi SSO tidak valid, sesi lokal dihapus dan user diarahkan ke login SSO.
 
 ```php
 <?php
 
 namespace App\Http\Middleware;
 
-use App\Services\SsoClient;
+use App\Services\SsoClientService;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
 
-class SsoAuthenticate
+class SsoMiddleware
 {
+    public function __construct(private readonly SsoClientService $ssoClient) {}
+
     public function handle(Request $request, Closure $next): Response
     {
-        $accessToken = session('sso_access_token');
-
-        if (! $accessToken) {
-            return redirect()->to(url('/auth/redirect'));
+        if ($this->shouldSkipSso($request)) {
+            return $next($request);
         }
 
-        $sso = app(SsoClient::class);
-        $user = $sso->validateToken($accessToken);
+        if (Auth::check()) {
+            $lastValidatedAt = (int) $request->session()->get('sso_last_validated_at', 0);
 
-        // Coba refresh jika access token sudah tidak valid
-        if (is_null($user) && ($refreshToken = session('sso_refresh_token'))) {
-            if ($new = $sso->refresh($refreshToken)) {
-                session()->put('sso_access_token', $new['access_token']);
-                session()->put('sso_refresh_token', $new['refresh_token'] ?? $refreshToken);
-                SsoClient::flushTokenCache($accessToken);
-                $user = $sso->validateToken($new['access_token']);
+            // Hindari request UserInfo ke IdP pada setiap request halaman.
+            if ($lastValidatedAt > (time() - 60)) {
+                return $next($request);
+            }
+
+            if ($this->ssoClient->validateSession()) {
+                $request->session()->put('sso_last_validated_at', time());
+
+                return $next($request);
+            }
+
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
+
+        if (! $request->expectsJson()) {
+            // Simpan URL tujuan agar setelah login SSO user kembali ke
+            // halaman yang tadi diminta (mis. /admin/pengajuan-pls).
+            return redirect()->guest(route('sso.login'));
+        }
+
+        return response()->json(['error' => 'Authentication required'], 401);
+    }
+
+    protected function shouldSkipSso(Request $request): bool
+    {
+        if ($request->routeIs([
+            'sso.login',
+            'sso.callback',
+            'sso.logout',
+            'sso.backchannel-logout',
+            'sso.session-status',
+        ])) {
+            return true;
+        }
+
+        if ($request->is('api/*')) {
+            return true;
+        }
+
+        $publicRoutes = [
+            '/',
+            'login',
+            'register',
+            'password/reset',
+            'password/email',
+            'password/reset/*',
+        ];
+
+        $path = $request->path();
+
+        foreach ($publicRoutes as $route) {
+            if (fnmatch($route, $path)) {
+                return true;
             }
         }
 
-        if (is_null($user)) {
-            session()->forget(['sso_access_token', 'sso_refresh_token', 'sso_user']);
-            return redirect()->to(url('/auth/redirect'));
-        }
-
-        session()->put('sso_user', $user);
-        return $next($request);
+        return false;
     }
 }
 ```
 
-### 5. Controller Auth & Back-Channel Logout
+> Kelas ini bernama **`SsoMiddleware`** di SIM-UKPBJ (bukan `SsoAuthenticate`).
+> Alias `sso` didaftarkan di `bootstrap/app.php`.
 
-#### `app/Http/Controllers/Auth/AuthController.php`
+### 5. Controller SSO & Back-Channel Logout
+
+#### `app/Http/Controllers/SsoController.php`
+
+Di SIM-UKPBJ, login, callback, logout, back-channel logout, dan cek status sesi
+berada dalam satu controller. Route name `filament.admin.auth.login` dan
+`filament.admin.pages.dashboard` khusus Filament — ganti dengan route aplikasi
+klien kamu.
 
 ```php
 <?php
 
-namespace App\Http\Controllers\Auth;
+namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
+use App\Exceptions\JwksUnavailableException;
 use App\Models\User;
-use App\Services\SsoClient;
+use App\Services\LogoutTokenVerifier;
+use App\Services\SsoClientService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use RuntimeException;
+use Throwable;
 
-class AuthController extends Controller
+class SsoController extends Controller
 {
-    public function redirect(): RedirectResponse
+    public function __construct(
+        private readonly SsoClientService $ssoClient,
+        private readonly LogoutTokenVerifier $logoutTokenVerifier,
+    ) {}
+
+    /**
+     * Mulai login SSO.
+     */
+    public function login(): RedirectResponse
     {
-        return redirect()->to(app(SsoClient::class)->redirectUrl());
+        try {
+            return redirect()->away($this->ssoClient->getAuthorizationUrl());
+        } catch (Throwable $e) {
+            Log::error('[SSO] Gagal membuat URL authorization', ['error' => $e->getMessage()]);
+
+            return redirect()
+                ->route('filament.admin.auth.login')
+                ->with('error', 'Konfigurasi SSO belum siap. Hubungi administrator.');
+        }
     }
 
-    public function callback(Request $request, SsoClient $sso): RedirectResponse
+    /**
+     * Callback OAuth: tukar code, ambil profil, lalu login lokal.
+     */
+    public function callback(Request $request): RedirectResponse
     {
-        abort_if(! $request->code, 400, 'Authorization code tidak ditemukan.');
-        abort_unless(hash_equals((string) session('sso_state'), (string) $request->state), 400, 'State tidak valid.');
+        try {
+            if ($request->filled('error')) {
+                throw new RuntimeException('IdP mengembalikan error: '.$request->input('error'));
+            }
 
-        $tokens = $sso->exchangeCode($request->code);
-        $claims = $sso->validateToken($tokens['access_token']);
+            $code = (string) $request->input('code', '');
+            $state = (string) $request->input('state', '');
 
-        session()->put('sso_access_token', $tokens['access_token']);
-        session()->put('sso_refresh_token', $tokens['refresh_token'] ?? null);
-        session()->put('sso_user', $claims);
+            if ($code === '' || $state === '') {
+                throw new RuntimeException('Parameter code/state tidak lengkap.');
+            }
 
-        // Mapping user lokal berdasarkan sub IdP (penting untuk back-channel logout)
-        $user = User::firstOrNew(['sso_sub' => (string) ($claims['sub'] ?? '')]);
-        $user->fill([
-            'sso_sub' => (string) ($claims['sub'] ?? ''),
-            'name' => $claims['name'] ?? 'Pengguna IdP',
-            'email' => $claims['email'] ?? 'unknown@idp.local',
-            'nip' => $claims['nip'] ?? null,
-        ]);
+            $this->ssoClient->exchangeCodeForTokens($code, $state);
+            $userInfo = $this->ssoClient->getUserInfo();
+            $user = $this->createOrUpdateUser($userInfo);
 
-        if (! $user->exists) {
-            $user->password = bcrypt(Str::random(32));
+            Auth::login($user);
+            $request->session()->regenerate();
+
+            // Ambil JWKS sekarang (IdP sedang tidak sibuk) agar back-channel
+            // logout nanti tidak perlu HTTP ke IdP di tengah proses logout.
+            $this->logoutTokenVerifier->warm();
+
+            // Setelah SSO berhasil, user langsung masuk ke aplikasi asli
+            // (panel Filament /admin), bukan halaman perantara.
+            return redirect()->intended(route('filament.admin.pages.dashboard'));
+        } catch (Throwable $e) {
+            Log::error('[SSO] Callback gagal', [
+                'error' => $e->getMessage(),
+                'ip' => $request->ip(),
+            ]);
+
+            return redirect()
+                ->route('filament.admin.auth.login')
+                ->with('error', 'Login SSO gagal. Silakan coba lagi atau hubungi administrator.');
+        }
+    }
+
+    /**
+     * Logout lokal lalu lanjutkan ke Single Logout IdP.
+     */
+    public function logout(): RedirectResponse
+    {
+        $redirectUrl = route('home');
+
+        try {
+            $redirectUrl = $this->ssoClient->logoutUrl();
+        } catch (Throwable $e) {
+            Log::warning('[SSO] Gagal membuat URL logout IdP', ['error' => $e->getMessage()]);
+        }
+
+        Auth::logout();
+        request()->session()->invalidate();
+        request()->session()->regenerateToken();
+
+        return redirect()->away($redirectUrl);
+    }
+
+    /**
+     * Terima OIDC Back-Channel Logout dari IdP.
+     */
+    public function backchannelLogout(Request $request, LogoutTokenVerifier $verifier): JsonResponse
+    {
+        $logoutToken = (string) $request->input('logout_token', '');
+
+        if ($logoutToken === '') {
+            return response()->json(['error' => 'invalid_request'], 400);
+        }
+
+        try {
+            $claims = $verifier->verify($logoutToken);
+        } catch (JwksUnavailableException $e) {
+            // Infrastruktur (JWKS tidak bisa diambil) — biarkan IdP retry.
+            Log::error('[SSO] Back-channel logout tertunda: JWKS tidak tersedia', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json(['error' => 'temporarily_unavailable'], 503);
+        } catch (Throwable $e) {
+            Log::warning('[SSO] Back-channel logout ditolak', [
+                'error' => $e->getMessage(),
+                'ip' => $request->ip(),
+            ]);
+
+            return response()->json(['error' => 'invalid_request'], 400);
+        }
+
+        $subject = isset($claims['sub']) ? (string) $claims['sub'] : '';
+
+        if ($subject !== '') {
+            $user = User::where('sso_sub', $subject)->first();
+
+            if ($user) {
+                $this->invalidateLocalSessions($user);
+            }
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Cek status sesi SSO (dipakai opsional oleh frontend).
+     */
+    public function sessionStatus(): JsonResponse
+    {
+        try {
+            $isValid = $this->ssoClient->validateSession();
+
+            return response()->json([
+                'valid' => $isValid,
+                'user' => $isValid ? Auth::user() : null,
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('[SSO] Cek status sesi gagal', ['error' => $e->getMessage()]);
+
+            return response()->json(['valid' => false]);
+        }
+    }
+
+    /**
+     * Buat atau sinkronkan user lokal dari klaim UserInfo.
+     */
+    protected function createOrUpdateUser(array $userInfo): User
+    {
+        $subject = trim((string) ($userInfo['sub'] ?? ''));
+
+        if ($subject === '') {
+            throw new RuntimeException('Profil SSO tidak memiliki subjek (sub).');
+        }
+
+        $email = strtolower(trim((string) ($userInfo['email'] ?? '')));
+        $nip = preg_replace('/[\s.\-]+/u', '', (string) ($userInfo['nip'] ?? '')) ?: '';
+        $name = trim((string) ($userInfo['name'] ?? ''));
+
+        if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new RuntimeException('Alamat email dari SSO tidak valid.');
+        }
+
+        if ($email === '' && $nip === '') {
+            throw new RuntimeException('Profil SSO harus memiliki email atau NIP.');
+        }
+
+        $user = User::where('sso_sub', $subject)->first();
+
+        if (! $user && $email !== '') {
+            $user = User::where('email', $email)->first();
+        }
+
+        if (! $user && $nip !== '') {
+            $user = User::where('nip', $nip)->first();
+        }
+
+        $isNew = ! $user;
+
+        if ($isNew) {
+            if ($email === '') {
+                throw new RuntimeException('User baru dari SSO wajib memiliki email.');
+            }
+
+            $user = new User;
+            $user->email = $email;
+            $user->password = Str::random(40);
+            $user->email_verified_at = now();
+            $user->is_active = true;
+        }
+
+        $user->sso_sub = $subject;
+
+        if ($name !== '') {
+            $user->name = $name;
+        } elseif ($isNew) {
+            $user->name = 'Pengguna SSO';
+        }
+
+        if ($email !== '') {
+            $user->email = $email;
+        }
+
+        if ($nip !== '') {
+            $user->nip = $nip;
         }
 
         $user->save();
-        Auth::login($user, true);
 
-        return redirect()->route('dashboard');
+        return $user;
     }
 
-    public function logout(Request $request): RedirectResponse
+    /**
+     * Hapus semua sesi browser lokal milik user (session driver database).
+     */
+    protected function invalidateLocalSessions(User $user): void
     {
-        app(SsoClient::class)->revokeAndForget();
+        if (config('session.driver') !== 'database') {
+            return;
+        }
 
-        // Logout LOKAL: sesi aplikasi ini berakhir, sesi IdP tetap aktif.
-        // Redirect ke dashboard IdP; user bisa masuk lagi tanpa login ulang.
-        auth()->logout();
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
-
-        return redirect()->to(config('sso.dashboard_endpoint'));
-    }
-
-    public function logoutSso(Request $request): RedirectResponse
-    {
-        app(SsoClient::class)->revokeAndForget();
-
-        // Logout GLOBAL (Single Logout): sesi IdP + semua aplikasi berakhir.
-        $params = http_build_query([
-            'client_id' => config('sso.client_id'),
-            'post_logout_redirect_uri' => config('sso.post_logout_redirect_uri'),
-        ]);
-
-        return redirect()->to(config('sso.logout_endpoint').'?'.$params);
+        try {
+            DB::table(config('session.table', 'sessions'))
+                ->where('user_id', $user->id)
+                ->delete();
+        } catch (Throwable $e) {
+            Log::error('[SSO] Gagal menghapus sesi lokal user', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }
 ```
 
 #### `app/Services/LogoutTokenVerifier.php`
 
+Verifier SIM-UKPBJ memeriksa **algoritma RS256**, `kid`, signature via JWKS,
+`iss`, `aud`, `iat`/`exp`, umur token maksimal 120 detik, klaim
+`events` backchannel-logout, larangan `nonce`, `jti` anti-replay, dan `sub`/`sid`.
+JWKS di-cache 1 jam dan **dipanaskan saat login** (`warm()`) untuk menghindari
+deadlock pada dev server single-thread.
+
+Verifier memakai `App\Exceptions\JwksUnavailableException` (turunan
+`RuntimeException`) agar kegagalan mengambil JWKS dibedakan dari token yang
+memang invalid. Dengan begitu endpoint back-channel bisa membalas `503`
+(IdP retry) alih-alih `400` (gagal permanen).
+
 ```php
 <?php
 
 namespace App\Services;
 
+use App\Exceptions\JwksUnavailableException;
 use Firebase\JWT\JWK;
 use Firebase\JWT\JWT;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
+use Throwable;
 
 class LogoutTokenVerifier
 {
-    public function verify(string $logoutToken): object
+    public const EVENT = 'http://schemas.openid.net/event/backchannel-logout';
+
+    public const MAX_TTL_SECONDS = 120;
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function verify(string $jwt): array
     {
-        $jwks = $this->fetchJwks();
+        $segments = explode('.', $jwt);
 
-        $keys = JWK::parseKeySet($jwks, 'RS256');
-        $claims = JWT::decode($logoutToken, $keys);
-
-        if ($claims->iss !== config('sso.issuer')) {
-            throw new \RuntimeException('Invalid issuer');
+        if (count($segments) !== 3) {
+            throw new RuntimeException('Logout token bukan JWT yang valid.');
         }
 
-        if (! in_array(config('sso.client_id'), (array) $claims->aud)) {
-            throw new \RuntimeException('Invalid audience');
+        $header = json_decode($this->base64UrlDecode($segments[0]), true);
+
+        if (! is_array($header)) {
+            throw new RuntimeException('Header logout token tidak valid.');
         }
 
-        if (! isset($claims->events->{'http://schemas.openid.net/event/backchannel-logout'})) {
-            throw new \RuntimeException('Missing backchannel-logout event');
+        if (($header['alg'] ?? null) !== 'RS256') {
+            throw new RuntimeException('Algoritma logout token wajib RS256.');
         }
 
-        // Anti-replay protection
-        if (Cache::get('logout_jti:'.$claims->jti)) {
-            throw new \RuntimeException('Replay logout token detected');
+        if (empty($header['kid']) || ! is_string($header['kid'])) {
+            throw new RuntimeException('Header logout token wajib memiliki kid.');
         }
-        Cache::put('logout_jti:'.$claims->jti, true, 600);
+
+        $leeway = max(0, (int) config('sso.logout_token.leeway', 60));
+        JWT::$leeway = $leeway;
+
+        $claims = $this->decode($jwt);
+
+        $issuer = rtrim((string) config('sso.issuer'), '/');
+        $claimIssuer = rtrim((string) ($claims['iss'] ?? ''), '/');
+
+        if ($issuer === '' || ! hash_equals($issuer, $claimIssuer)) {
+            throw new RuntimeException('Issuer logout token tidak cocok.');
+        }
+
+        $audiences = $claims['aud'] ?? [];
+        $audiences = is_array($audiences) ? $audiences : [$audiences];
+
+        if (! in_array((string) config('sso.client_id'), array_map('strval', $audiences), true)) {
+            throw new RuntimeException('Audience logout token tidak cocok.');
+        }
+
+        $iat = (int) ($claims['iat'] ?? 0);
+        $exp = (int) ($claims['exp'] ?? 0);
+        $now = time();
+
+        if ($iat <= 0 || $exp <= 0) {
+            throw new RuntimeException('Logout token wajib memiliki iat dan exp.');
+        }
+
+        if ($exp <= ($now - $leeway)) {
+            throw new RuntimeException('Logout token sudah kedaluwarsa.');
+        }
+
+        if ($iat > ($now + $leeway)) {
+            throw new RuntimeException('iat logout token berada di masa depan.');
+        }
+
+        if (($exp - $iat) > self::MAX_TTL_SECONDS) {
+            throw new RuntimeException('Umur logout token melebihi batas 120 detik.');
+        }
+
+        $events = (array) ($claims['events'] ?? []);
+
+        if (! array_key_exists(self::EVENT, $events)) {
+            throw new RuntimeException('Klaim events backchannel-logout tidak ada.');
+        }
+
+        if (array_key_exists('nonce', $claims)) {
+            throw new RuntimeException('Logout token tidak boleh mengandung nonce.');
+        }
+
+        $jti = (string) ($claims['jti'] ?? '');
+
+        if ($jti === '') {
+            throw new RuntimeException('Logout token wajib memiliki jti.');
+        }
+
+        $sub = isset($claims['sub']) ? (string) $claims['sub'] : null;
+        $sid = isset($claims['sid']) ? (string) $claims['sid'] : null;
+
+        if ($sub === null && $sid === null) {
+            throw new RuntimeException('Logout token wajib memiliki sub atau sid.');
+        }
+
+        $this->consumeJti($jti, max(1, $exp - $now + $leeway));
 
         return $claims;
     }
 
     /**
-     * Ambil JWKS IdP dengan fallback stale-copy.
-     *
-     * PENTING: tanpa fallback ini bisa terjadi deadlock sirkular pada dev
-     * server single-worker (Windows tidak mendukung PHP_CLI_SERVER_WORKERS):
-     * IdP sedang sibuk mengirim back-channel logout -> SP fetch JWKS balik
-     * ke IdP -> IdP tidak bisa melayani -> saling menunggu hingga timeout.
-     * Solusinya: setiap fetch sukses disalin permanen ke file; jika fetch
-     * gagal/timeout, verifikasi tetap jalan memakai salinan terakhir.
+     * @return array<string, mixed>
      */
-    protected function fetchJwks(): array
+    protected function decode(string $jwt): array
     {
-        return Cache::remember('sso_jwks', 3600, function () {
+        try {
+            return (array) JWT::decode($jwt, JWK::parseKeySet($this->jwks(), 'RS256'));
+        } catch (JwksUnavailableException $e) {
+            // Masalah infrastruktur: jangan dianggap token invalid.
+            throw $e;
+        } catch (Throwable $e) {
+            // Kemungkinan IdP merotasi key. Ambil JWKS terbaru sekali.
             try {
-                $jwks = Http::timeout(3)->get(config('sso.jwks_endpoint'))->throw()->json();
+                return (array) JWT::decode($jwt, JWK::parseKeySet($this->jwks(true), 'RS256'));
+            } catch (JwksUnavailableException $retry) {
+                throw $retry;
+            } catch (Throwable $retry) {
+                throw new RuntimeException('Signature logout token tidak valid.', 0, $retry);
+            }
+        }
+    }
 
-                // Simpan salinan permanen untuk fallback
-                if (! empty($jwks['keys'])) {
-                    \Storage::disk('local')->put('sso_jwks.json', json_encode($jwks));
+    /**
+     * @return array{keys: array<int, array<string, mixed>>}
+     */
+    protected function jwks(bool $force = false): array
+    {
+        $uri = (string) config('sso.logout_token.jwks_uri');
+
+        if ($uri === '') {
+            $uri = rtrim((string) config('sso.issuer'), '/').'/oauth/jwks';
+        }
+
+        $cacheKey = 'sso:jwks:'.sha1($uri);
+
+        if ($force) {
+            Cache::forget($cacheKey);
+        }
+
+        return Cache::remember($cacheKey, 3600, function () use ($uri) {
+            try {
+                $response = Http::timeout((int) config('sso.http_timeout', 10))
+                    ->acceptJson()
+                    ->get($uri);
+
+                if (! $response->successful()) {
+                    throw new RuntimeException('JWKS endpoint mengembalikan HTTP '.$response->status());
+                }
+
+                $jwks = $response->json();
+
+                if (! is_array($jwks) || empty($jwks['keys']) || ! is_array($jwks['keys'])) {
+                    throw new RuntimeException('JWKS tidak valid.');
                 }
 
                 return $jwks;
-            } catch (\Throwable $e) {
-                // Fallback: pakai salinan JWKS terakhir yang sukses di-fetch
-                $stale = \Storage::disk('local')->get('sso_jwks.json');
+            } catch (Throwable $e) {
+                Log::error('[SSO] Gagal mengambil JWKS', [
+                    'uri' => $uri,
+                    'error' => $e->getMessage(),
+                ]);
 
-                if ($stale !== null) {
-                    $decoded = json_decode($stale, true);
-
-                    if (! empty($decoded['keys'])) {
-                        report($e); // tetap tercatat, tapi tidak fatal
-
-                        return $decoded;
-                    }
-                }
-
-                throw $e;
+                throw new JwksUnavailableException('JWKS IdP tidak dapat diambil.', 0, $e);
             }
         });
     }
-}
-```
 
-#### `app/Http/Controllers/Auth/BackChannelLogoutController.php`
-
-```php
-<?php
-
-namespace App\Http\Controllers\Auth;
-
-use App\Http\Controllers\Controller;
-use App\Models\User;
-use App\Services\LogoutTokenVerifier;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Session;
-
-class BackChannelLogoutController extends Controller
-{
-    public function __invoke(Request $request, LogoutTokenVerifier $verifier): JsonResponse
+    /**
+     * Panaskan cache JWKS di luar jalur back-channel.
+     *
+     * Back-channel logout dikirim saat IdP sedang memproses logout. Bila
+     * JWKS belum pernah diambil, permintaan HTTP ke IdP dapat menunggu
+     * proses logout selesai (deadlock pada server single-thread seperti
+     * `php artisan serve`). Dengan memanggil ini ketika user login, token
+     * logout dapat diverifikasi tanpa round-trip ke IdP.
+     */
+    public function warm(): void
     {
-        $logoutToken = $request->input('logout_token');
-
-        if (! $logoutToken) {
-            return response()->json(['error' => 'missing logout_token'], 400);
+        try {
+            $this->jwks();
+        } catch (Throwable $e) {
+            Log::warning('[SSO] Gagal memanaskan cache JWKS', [
+                'error' => $e->getMessage(),
+            ]);
         }
+    }
+
+    protected function consumeJti(string $jti, int $ttl): void
+    {
+        $store = Cache::store(config('sso.logout_token.jti_store'));
 
         try {
-            $claims = $verifier->verify($logoutToken);
-        } catch (\Throwable $e) {
-            return response()->json(['error' => 'invalid_logout_token'], 400);
+            $fresh = $store->add('sso:logout-jti:'.hash('sha256', $jti), 1, $ttl);
+        } catch (Throwable $e) {
+            Log::error('[SSO] Cache anti-replay jti tidak tersedia', [
+                'error' => $e->getMessage(),
+            ]);
+
+            throw new RuntimeException('Anti-replay jti tidak tersedia.', 0, $e);
         }
 
-        $user = User::where('sso_sub', $claims->sub)->first();
+        if (! $fresh) {
+            throw new RuntimeException('Logout token sudah pernah dipakai (replay).');
+        }
+    }
 
-        if ($user) {
-            DB::table('sessions')->where('user_id', $user->id)->pluck('id')->each(function ($id) {
-                Session::getHandler()->destroy($id);
-            });
+    protected function base64UrlDecode(string $value): string
+    {
+        $remainder = strlen($value) % 4;
+
+        if ($remainder) {
+            $value .= str_repeat('=', 4 - $remainder);
         }
 
-        return response()->json(['message' => 'sessions destroyed successfully']);
+        return (string) base64_decode(strtr($value, '-_', '+/'), true);
     }
 }
 ```
+
+#### Back-Channel Logout — `SsoController::backchannelLogout()`
+
+SIM-UKPBJ **tidak** memakai controller terpisah `BackChannelLogoutController`.
+Endpoint `POST /sso/backchannel-logout` ditangani method `backchannelLogout()`
+di `SsoController` (kode lengkapnya ada di atas). Perilakunya:
+
+| Kondisi | Respons |
+|---|---|
+| `logout_token` tidak ada | `400 {"error":"invalid_request"}` |
+| JWKS tidak dapat diambil | `503 {"error":"temporarily_unavailable"}` → IdP retry |
+| Token invalid/replay | `400 {"error":"invalid_request"}` |
+| Token valid | `200 {"status":"ok"}` |
+
+Saat token valid, semua baris `sessions` milik user dengan `sso_sub` tersebut
+dihapus (session driver `database`). Endpoint ini dikecualikan dari CSRF karena
+dipanggil server-to-server oleh IdP.
 
 ### 6. Routes, Middleware & Bootstrap
 
 #### `routes/web.php`
 
+SIM-UKPBJ memakai prefix dan middleware dari `config/sso.php`. Root `/` adalah
+landing page publik; panel Filament `/admin` dilindungi middleware `auth` + `sso`.
+
 ```php
 <?php
 
-use App\Http\Controllers\Auth\AuthController;
-use App\Http\Controllers\Auth\BackChannelLogoutController;
+use App\Http\Controllers\CetakPengajuanController;
+use App\Http\Controllers\SsoController;
 use Illuminate\Support\Facades\Route;
 
-// Alur SSO
-Route::get('/auth/redirect', [AuthController::class, 'redirect'])->name('sso.redirect');
-Route::get('/auth/callback', [AuthController::class, 'callback'])->name('sso.callback');
+// Titik masuk aplikasi.
+// - Sudah login -> langsung panel Filament.
+// - Belum login -> tampilkan landing page (bukan langsung dilempar ke SSO).
+Route::get('/', function () {
+    if (auth()->check()) {
+        return redirect()->to(route('filament.admin.pages.dashboard'));
+    }
 
-// Logout LOKAL (sesi IdP tetap aktif)
-Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
-// Logout GLOBAL / Single Logout
-Route::post('/logout/sso', [AuthController::class, 'logoutSso'])->name('logout.sso');
+    return view('welcome');
+})->name('home');
 
-// Endpoint Back-Channel Logout (dipanggil server-to-server oleh IdP)
-Route::post('/sso/backchannel-logout', BackChannelLogoutController::class)->name('sso.backchannel-logout');
+// SSO routes
+if (config('sso.enabled', true)) {
+    Route::prefix(config('sso.prefix', 'sso'))
+        ->middleware(config('sso.middleware', ['web']))
+        ->group(function () {
+            Route::get('login', [SsoController::class, 'login'])->name('sso.login');
+            Route::get('callback', [SsoController::class, 'callback'])->name('sso.callback');
+            Route::get('logout', [SsoController::class, 'logout'])->name('sso.logout');
+            Route::post('backchannel-logout', [SsoController::class, 'backchannelLogout'])->name('sso.backchannel-logout');
+            Route::get('session-status', [SsoController::class, 'sessionStatus'])->name('sso.session-status');
+        });
+}
 
-// Halaman publik setelah logout global
-Route::get('/goodbye', fn () => view('goodbye'))->name('goodbye');
-
-// Halaman yang dilindungi oleh SSO
-Route::middleware('sso')->group(function () {
-    Route::get('/', fn () => view('dashboard'))->name('dashboard');
+// Route lain yang dilindungi SSO (panel utama ada di Filament /admin)
+Route::middleware(['auth', 'sso'])->group(function () {
+    Route::get('/cetak-pengajuan/{id}', [CetakPengajuanController::class, 'print'])
+        ->name('cetak.pengajuan');
 });
 ```
+
+Perbedaan penting dari contoh generik:
+
+- Login dimulai dari **`GET /sso/login`**, bukan `/auth/redirect`.
+- Callback ada di **`/sso/callback`**.
+- Logout memakai **`GET /sso/logout`** (RP-initiated SLO), bukan `POST /logout/sso`.
+- Back-channel ada di **`POST /sso/backchannel-logout`**.
+- Tidak ada route `/goodbye`; tujuan logout adalah `/` (`SSO_LOGOUT_URI`).
 
 #### `bootstrap/app.php`
 
@@ -1297,17 +2015,28 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-    ->withMiddleware(function (Middleware $middleware) {
+    ->withMiddleware(function (Middleware $middleware): void {
+        // Alias middleware SSO
         $middleware->alias([
-            'sso' => \App\Http\Middleware\SsoAuthenticate::class,
+            'sso' => \App\Http\Middleware\SsoMiddleware::class,
         ]);
 
-        // Exclude CSRF untuk endpoint back-channel logout (request dari server IdP)
+        // Tamu yang membuka halaman terproteksi diarahkan ke login SSO.
+        // URL tujuan disimpan agar setelah login user kembali ke halaman itu.
+        $middleware->redirectGuestsTo(function (\Illuminate\Http\Request $request) {
+            if ($request->isMethod('GET') && ! $request->expectsJson()) {
+                $request->session()->put('url.intended', $request->fullUrl());
+            }
+
+            return route('sso.login');
+        });
+
+        // Back-channel logout dikirim server-to-server oleh IdP, tanpa CSRF token.
         $middleware->validateCsrfTokens(except: [
             'sso/backchannel-logout',
         ]);
     })
-    ->withExceptions(function (Exceptions $exceptions) {
+    ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();
 ```
@@ -1400,13 +2129,13 @@ Dua hal yang mudah terlewat setelah client terdaftar:
 
 - [ ] **Dependency**: `composer require firebase/php-jwt:^6.10 guzzlehttp/guzzle:^7.8` (wajib); `laravel/passport` **tidak** dipakai di klien
 - [ ] **Ekstensi PHP**: `openssl`, `curl`, `mbstring`, `json`, `fileinfo`, `pdo` (+ driver DB)
-- [ ] **File wajib**: `config/sso.php`, `app/Services/SsoClient.php`, `app/Services/LogoutTokenVerifier.php`, `app/Http/Middleware/SsoAuthenticate.php`, `app/Http/Controllers/Auth/AuthController.php`, `app/Http/Controllers/Auth/BackChannelLogoutController.php`
+- [ ] **File wajib (SIM-UKPBJ)**: `config/sso.php`, `app/Services/SsoClientService.php`, `app/Services/LogoutTokenVerifier.php`, `app/Exceptions/JwksUnavailableException.php`, `app/Http/Middleware/SsoMiddleware.php`, `app/Http/Controllers/SsoController.php`, `routes/web.php`, `bootstrap/app.php`
 - [ ] **Bootstrap**: Register middleware alias `sso` dan tambahkan `sso/backchannel-logout` ke `validateCsrfTokens(except: [])`
 - [ ] **Database**: Tambah kolom `sso_sub`, `nip` ke tabel `users` & ubah `password` jadi nullable. Gunakan `SESSION_DRIVER=database`
 - [ ] **IdP**: Daftarkan client dengan `redirect_uris` dan `backchannel_logout_uri` yang benar
 - [ ] **IdP**: Tambahkan origin aplikasi ke `SSO_FORM_ACTION_ORIGINS` lalu `php artisan config:clear`
 - [ ] **JWKS**: Cache `/oauth/jwks` + stale fallback (dan prewarm saat login) agar SLO tidak deadlock di dev server
 - [ ] **Uji alur**: Akses route terproteksi → redirect ke IdP → login → callback kembali ke aplikasi klien
-- [ ] **Uji logout lokal**: tombol "Keluar (Aplikasi Ini)" → sesi klien berakhir, redirect ke dashboard IdP, sesi IdP tetap aktif
-- [ ] **Uji SLO**: tombol "Logout Semua (SSO)" → IdP melakukan global logout & mengirim back-channel ke klien → seluruh sesi klien terhancurkan otomatis
+- [ ] **Uji logout lokal**: `Auth::logout()` + invalidate session **tanpa** memanggil `/sso/logout` → sesi klien berakhir, sesi IdP tetap aktif
+- [ ] **Uji SLO**: `GET /sso/logout` → IdP melakukan global logout & mengirim back-channel ke klien → seluruh sesi klien terhancurkan otomatis
 - [ ] **Uji audit**: `sso_logout_audit.status = delivered` & `http_status = 200` untuk client tersebut

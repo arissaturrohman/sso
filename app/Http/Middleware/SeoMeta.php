@@ -38,8 +38,8 @@ class SeoMeta
             'json_ld' => 'home',
         ],
         'login' => [
-            'title' => 'Login Terpadu SSO — UKPBJ Demak | Akses Semua Aplikasi',
-            'description' => 'Masuk ke SSO UKPBJ Demak dengan email atau NIP Anda untuk mengakses seluruh aplikasi terhubung. Klik tombol Masuk untuk melanjutkan ke login terpadu sekarang.',
+            'title' => 'Login SSO UKPBJ Demak — Akses Terpadu Layanan Pengadaan',
+            'description' => 'Masuk ke portal SSO UKPBJ Demak dan akses layanan pengadaan terpadu dalam satu akun. Login aman memakai email atau NIP yang terdaftar. Klik Masuk untuk mulai.',
             'json_ld' => 'login',
         ],
     ];
@@ -126,20 +126,27 @@ class SeoMeta
     }
 
     /**
-     * Structured data JSON-LD.
+     * Structured data JSON-LD (satu blok script per entitas).
      *  - home  : GovernmentOrganization + WebSite + WebApplication
-     *  - login : WebPage yang menjadi bagian WebSite
+     *  - login : GovernmentOrganization + WebSite + WebApplication + WebPage
+     *
+     * Catatan: `WebSite.potentialAction` berupa `SearchAction` SENGaja tidak
+     * ditulis — situs ini tidak punya fitur pencarian, dan Google sudah
+     * menghentikan rich result "Sitelinks Search Box" (September 2024).
+     * Menulis SearchAction untuk endpoint yang tidak ada justru berisiko
+     * ditandai structured data yang menyesatkan.
      */
     protected static function jsonLd(string $kind): array
     {
         $orgId = url('/').'#organization';
+        $websiteId = url('/').'#website';
 
         $organization = [
             '@context' => 'https://schema.org',
             '@type' => 'GovernmentOrganization',
             '@id' => $orgId,
-            'name' => 'UKPBJ Demak',
-            'alternateName' => 'Unit Kerja Pengadaan Barang/Jasa Kabupaten Demak',
+            'name' => 'UKPBJ Kabupaten Demak',
+            'alternateName' => ['UKPBJ Demak', 'Unit Kerja Pengadaan Barang/Jasa Kabupaten Demak'],
             'description' => 'Unit Kerja Pengadaan Barang/Jasa (UKPBJ) Kabupaten Demak — penyelenggara layanan pengadaan barang/jasa pemerintah.',
             'url' => url('/'),
             'areaServed' => [
@@ -156,8 +163,40 @@ class SeoMeta
             $organization['logo'] = url('img/logo.png');
         }
 
+        $website = [
+            '@context' => 'https://schema.org',
+            '@type' => 'WebSite',
+            '@id' => $websiteId,
+            'name' => config('app.name'),
+            'alternateName' => 'SSO UKPBJ Demak',
+            'url' => url('/'),
+            'inLanguage' => 'id',
+            'publisher' => ['@id' => $orgId],
+        ];
+
+        $webapp = [
+            '@context' => 'https://schema.org',
+            '@type' => 'WebApplication',
+            'name' => config('app.name'),
+            'alternateName' => 'Login Terpadu UKPBJ Demak',
+            'description' => self::PUBLIC_PAGES['home']['description'],
+            'url' => url('/login'),
+            'applicationCategory' => 'BusinessApplication',
+            'operatingSystem' => 'Web',
+            'inLanguage' => 'id',
+            'browserRequirements' => 'Mendukung JavaScript dan cookie',
+            'isAccessibleForFree' => true,
+            'offers' => [
+                '@type' => 'Offer',
+                'price' => '0',
+                'priceCurrency' => 'IDR',
+            ],
+            'author' => ['@id' => $orgId],
+            'publisher' => ['@id' => $orgId],
+        ];
+
         if ($kind === 'login') {
-            return [[
+            $webpage = [
                 '@context' => 'https://schema.org',
                 '@type' => 'WebPage',
                 '@id' => url('/login').'#webpage',
@@ -165,44 +204,17 @@ class SeoMeta
                 'description' => self::PUBLIC_PAGES['login']['description'],
                 'url' => url('/login'),
                 'inLanguage' => 'id',
-                'isPartOf' => [
-                    '@type' => 'WebSite',
-                    '@id' => url('/').'#website',
-                    'name' => config('app.name'),
-                    'url' => url('/'),
-                ],
-            ]];
+                'isPartOf' => ['@id' => $websiteId],
+                'about' => ['@id' => $orgId],
+            ];
+
+            if (is_file(public_path('img/og-image.png'))) {
+                $webpage['primaryImageOfPage'] = url('img/og-image.png');
+            }
+
+            return [$organization, $website, $webapp, $webpage];
         }
 
-        return [
-            $organization,
-            [
-                '@context' => 'https://schema.org',
-                '@type' => 'WebSite',
-                '@id' => url('/').'#website',
-                'name' => config('app.name'),
-                'alternateName' => 'SSO UKPBJ Demak',
-                'url' => url('/'),
-                'inLanguage' => 'id',
-                'publisher' => ['@id' => $orgId],
-            ],
-            [
-                '@context' => 'https://schema.org',
-                '@type' => 'WebApplication',
-                'name' => config('app.name'),
-                'description' => self::PUBLIC_PAGES['home']['description'],
-                'url' => url('/login'),
-                'applicationCategory' => 'BusinessApplication',
-                'operatingSystem' => 'Web',
-                'inLanguage' => 'id',
-                'browserRequirements' => 'Mendukung JavaScript dan cookie',
-                'offers' => [
-                    '@type' => 'Offer',
-                    'price' => '0',
-                    'priceCurrency' => 'IDR',
-                ],
-                'author' => ['@id' => $orgId],
-            ],
-        ];
+        return [$organization, $website, $webapp];
     }
 }

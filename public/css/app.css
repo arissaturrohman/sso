@@ -548,6 +548,47 @@ code {
     text-align: center;
 }
 
+/* H2 subjudul di kartu auth: tampil seperti paragraf ringkas,
+   tetapi tetap sebagai heading semantik untuk SEO & screen reader. */
+h2.auth-sub {
+    margin-bottom: 0;
+    font-weight: 500;
+}
+
+/* Hint bantuan di bawah input (aria-describedby target) */
+.auth-hint {
+    margin-top: 6px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--muted);
+}
+
+.auth-hint--end {
+    margin-top: 8px;
+    text-align: end;
+}
+
+/* Trust badge keamanan SSL di bawah kartu auth */
+.trust-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.trust-badge__icon {
+    display: inline-flex;
+    color: var(--success);
+}
+
+.trust-badge__icon svg {
+    width: 14px;
+    height: 14px;
+}
+
 .chip-row {
     display: flex;
     align-items: center;
@@ -587,6 +628,14 @@ code {
 .btn:focus-visible {
     outline: none;
     box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.28);
+}
+
+/* Loading state saat submit (mencegah double submit) */
+.btn.is-loading {
+    position: relative;
+    opacity: 0.75;
+    cursor: progress;
+    pointer-events: none;
 }
 
 .btn svg {

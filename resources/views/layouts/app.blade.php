@@ -13,7 +13,7 @@
 </head>
 <body>
 
-<a class="skip-link" href="#main">Lewati ke konten</a>
+<a class="skip-link" href="@yield('skip_link_target', '#main')">@yield('skip_link_text', 'Lewati ke konten')</a>
 
 <header class="site-header">
     <div class="site-header__inner">
