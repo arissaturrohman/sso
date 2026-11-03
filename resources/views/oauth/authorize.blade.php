@@ -23,7 +23,7 @@
 
         <form method="POST" action="{{ route('passport.authorizations.approve') }}">
             @csrf
-            <input type="hidden" name="authToken" value="{{ $authToken }}">
+            <input type="hidden" name="auth_token" value="{{ $authToken }}">
             <ul class="scope-list">
                 @foreach ($scopes as $scope)
                     <li class="scope-item">
@@ -42,7 +42,7 @@
 
         <form method="POST" action="{{ route('passport.authorizations.deny') }}">
             @csrf
-            <input type="hidden" name="authToken" value="{{ $authToken }}">
+            <input type="hidden" name="auth_token" value="{{ $authToken }}">
             <button type="submit" name="cancel" value="1" class="btn btn--secondary btn--block mt-2">Tolak</button>
         </form>
     </div>

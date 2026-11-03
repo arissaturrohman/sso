@@ -256,6 +256,39 @@ FONNTE_COUNTRY_CODE=62
 > Setelah mengubah `.env` di server produksi, jalankan `php artisan config:clear`
 > (atau `config:cache` bila memakai cache konfigurasi) agar `FONNTE_TOKEN` terbaca.
 
+### `response_mode=form_post` (wajib untuk klien di belakang Nginx/WAF)
+
+Kode otorisasi Passport berukuran **900+ karakter**. Bila IdP mengirimnya lewat
+query string, URL callback klien menjadi ±1 KB; vhost klien yang membatasi panjang
+request URI (mis. ±330 karakter) akan membalas **`403 Forbidden`** sebelum request
+sampai ke Laravel.
+
+Karena itu IdP menyediakan middleware
+`App\Http\Middleware\AuthorizeResponseMode` yang mengubah redirect akhir
+`/oauth/authorize` menjadi halaman HTML auto-submit (`response_mode=form_post`),
+sehingga `code`/`state` dikirim lewat **body POST** dan URI callback tetap pendek.
+
+Middleware ini **wajib terdaftar** di group `web` pada `bootstrap/app.php`:
+
+```php
+$middleware->web(append: [
+    \App\Http\Middleware\SeoMeta::class,
+    \App\Http\Middleware\EnsureAccountIsActive::class,
+    \App\Http\Middleware\ForcePasswordChange::class,
+    \App\Http\Middleware\TrackAuthorizeRequest::class,
+    \App\Http\Middleware\AuthorizeResponseMode::class, // form_post → anti 403 URI panjang
+]);
+```
+
+Klien mengaktifkannya lewat `SSO_RESPONSE_MODE=form_post` (nilai default
+`config/sso.php` pada aplikasi klien). Klien yang **tidak** mengirim
+`response_mode` tetap menerima redirect `302` seperti biasa (backward compatible).
+
+> **Gejala bila middleware ini tidak aktif:** callback berisi
+> `/sso/callback?code=def502...` (900+ karakter), lalu di produksi dibalas `403`
+> oleh Nginx/WAF — bukan oleh Laravel. Setelah aktif, callback menjadi
+> `POST /sso/callback` dengan `code`/`state` di body.
+
 ### Deployment di belakang reverse proxy (Nginx/Apache)
 
 IdP sudah dikonfigurasi untuk produksi HTTPS:
@@ -751,6 +784,8 @@ Kolom penting pada tabel `oauth_clients`:
 | `429 Too Many Requests` di `/oauth/token` | Batas 15×/menit per client+IP | Cache access token sampai mendekati 15 menit |
 | Dev Windows macet/timeout saat logout | Deadlock JWKS pada `artisan serve` single-worker | Prewarm JWKS saat login + stale fallback, atau jalankan multi-worker/PHP-FPM |
 | Alert **“This page has expired”** (HTTP 419) di aplikasi klien Filament | Polling Livewire berjalan saat sesi sudah dihapus (logout/back-channel) | Hook `Livewire.hook('request', ...)` → `preventDefault()` untuk 419; arahkan ke halaman login SSO |
+| **`403 Forbidden`** dari **nginx** saat callback (bukan halaman Laravel) | Query string callback terlalu panjang untuk aturan WAF/nginx. Kode otorisasi Passport bisa **900+ karakter**, sehingga URL callback ±1 KB | Aktifkan `response_mode=form_post` di klien **dan** pastikan middleware `App\Http\Middleware\AuthorizeResponseMode` terdaftar di group `web` (`bootstrap/app.php` IdP). Lalu longgarkan/naikkan batas query string di nginx/WAF untuk path callback. Cek `/var/log/nginx/error.log` dan log ModSecurity/WAF |
+| Callback **`404 Not Found`** | `SSO_REDIRECT_URI` di `.env` klien tidak sama dengan route yang benar (mis. `/auth/callback` padahal route-nya `/sso/callback`) | Samakan `.env` `SSO_REDIRECT_URI`, route, dan `redirect_uris` client di IdP; lalu `php artisan config:clear` |
 
 ### Contoh Nyata: SIM-UKPBJ (ARJUNA)
 
@@ -799,6 +834,7 @@ SSO_CLIENT_SECRET=<secret dari panel IdP>
 SSO_REDIRECT_URI=http://localhost:8001/sso/callback
 SSO_LOGOUT_URI=http://localhost:8001/
 SSO_ENABLED=true
+SSO_RESPONSE_MODE=form_post
 ```
 
 > SIM-UKPBJ memakai nama variabel **`SSO_LOGOUT_URI`** (dibaca `config/sso.php`
@@ -811,6 +847,7 @@ login di browser:
 ```env
 # sesuaikan dengan origin client lain yang juga aktif
 SSO_FORM_ACTION_ORIGINS=http://localhost:8001,http://rup-app.test
+# produksi: https://sim-ukpbj.demakkab.go.id,https://arjuna.ukpbj.demakkab.go.id
 ```
 
 Lalu bersihkan cache konfigurasi IdP:
@@ -818,6 +855,68 @@ Lalu bersihkan cache konfigurasi IdP:
 ```bash
 php artisan config:clear
 ```
+
+#### Konfigurasi yang diperbarui (perbaikan `403 Forbidden`)
+
+Ringkasan perubahan yang membuat login SSO berhasil sampai `/admin` di produksi.
+Semua nilai di bawah sudah diuji end-to-end secara lokal (IdP `:8000`, klien `:8001`).
+
+**Sisi IdP (`D:\laragon\www\sso`)**
+
+| File | Konfigurasi | Nilai |
+|---|---|---|
+| `bootstrap/app.php` | `$middleware->web(append: [...])` | `SeoMeta`, `EnsureAccountIsActive`, `ForcePasswordChange`, `TrackAuthorizeRequest`, **`AuthorizeResponseMode`** |
+| `.env` | `SSO_FORM_ACTION_ORIGINS` | `http://localhost:8001,http://rup-app.test,https://sim-ukpbj.demakkab.go.id,https://arjuna.ukpbj.demakkab.go.id` |
+| `.env.example` | `SSO_FORM_ACTION_ORIGINS` | `https://sim-ukpbj.demakkab.go.id,https://arjuna.ukpbj.demakkab.go.id` |
+| `app/Http/Middleware/AuthorizeResponseMode.php` | middleware baru (untracked) | konversi redirect `?code=` → form POST |
+
+```php
+// bootstrap/app.php — group web
+$middleware->web(append: [
+    \App\Http\Middleware\SeoMeta::class,
+    \App\Http\Middleware\EnsureAccountIsActive::class,
+    \App\Http\Middleware\ForcePasswordChange::class,
+    \App\Http\Middleware\TrackAuthorizeRequest::class,
+    \App\Http\Middleware\AuthorizeResponseMode::class, // response_mode=form_post
+]);
+```
+
+**Sisi klien (`D:\laragon\www\sim-ukpbj`)**
+
+| File | Konfigurasi | Nilai |
+|---|---|---|
+| `config/sso.php` | `response_mode` | `env('SSO_RESPONSE_MODE', 'form_post')` (sebelumnya `query`) |
+| `.env` / `.env.example` | `SSO_RESPONSE_MODE` | `form_post` |
+| `.env` | `SSO_REDIRECT_URI` | `https://sim-ukpbj.demakkab.go.id/sso/callback` |
+| `.env` | `SSO_LOGOUT_URI` | `https://sim-ukpbj.demakkab.go.id/` |
+| `bootstrap/app.php` | `trustProxies(at: '*')` | agar skema HTTPS dari reverse proxy terbaca |
+| `bootstrap/app.php` | `validateCsrfTokens(except: [...])` | `sso/backchannel-logout`, `sso/callback` |
+| `app/Http/Controllers/SsoController.php` | `createOrUpdateUser()` | sinkron `is_active = true` + `email_verified_at` dari IdP |
+
+```env
+# .env klien — nilai produksi
+APP_URL=https://sim-ukpbj.demakkab.go.id
+SSO_URL=https://sso.ukpbj.demakkab.go.id
+SSO_ISSUER=https://sso.ukpbj.demakkab.go.id
+SSO_CLIENT_ID=<Client ID dari panel IdP>
+SSO_CLIENT_SECRET=<Client Secret dari panel IdP>
+SSO_REDIRECT_URI=https://sim-ukpbj.demakkab.go.id/sso/callback
+SSO_LOGOUT_URI=https://sim-ukpbj.demakkab.go.id/
+SSO_ENABLED=true
+SSO_RESPONSE_MODE=form_post
+```
+
+Setelah mengubah konfigurasi di kedua sisi:
+
+```bash
+php artisan config:clear && php artisan config:cache
+```
+
+> **Penting saat deploy:** `app/Http/Middleware/AuthorizeResponseMode.php` masih
+> **untracked** di git IdP. Jalankan
+> `git add app/Http/Middleware/AuthorizeResponseMode.php bootstrap/app.php`
+> sebelum deploy, lalu pastikan baris `AuthorizeResponseMode::class` benar-benar
+> ada di `bootstrap/app.php` server produksi (jangan sampai tertimpa/ter-comment).
 
 #### Menjalankan lokal
 
@@ -854,6 +953,50 @@ Login IdP: `admin@sso.test` / `password123`.
   memicu SLO, tambahkan redirect khusus setelah logout ke `route('sso.logout')`.
 - Untuk logout lokal tanpa menyentuh IdP, jangan arahkan browser ke `/sso/logout`;
   cukup `Auth::logout()` + `session()->invalidate()` lalu redirect ke halaman lokal.
+
+#### Production: ARJUNA
+
+Nilai yang terpasang di production (per November 2026):
+
+| Item | Nilai |
+|---|---|
+| Aplikasi | `https://arjuna.ukpbj.demakkab.go.id` |
+| IdP | `https://sso.ukpbj.demakkab.go.id` |
+| Client ID | `01a18bb8-5d87-71f6-acc9-c304d7b24656` |
+| Route callback yang **benar** | `https://arjuna.ukpbj.demakkab.go.id/sso/callback` |
+| Route back-channel | `https://arjuna.ukpbj.demakkab.go.id/sso/backchannel-logout` |
+| Route login | `https://arjuna.ukpbj.demakkab.go.id/sso/login` |
+| Post-logout | `https://arjuna.ukpbj.demakkab.go.id` |
+
+`.env` production:
+
+```env
+SSO_URL=https://sso.ukpbj.demakkab.go.id
+SSO_ISSUER=https://sso.ukpbj.demakkab.go.id
+SSO_CLIENT_ID=01a18bb8-5d87-71f6-acc9-c304d7b24656
+SSO_CLIENT_SECRET=<secret production>
+SSO_REDIRECT_URI=https://arjuna.ukpbj.demakkab.go.id/sso/callback
+SSO_LOGOUT_URI=https://arjuna.ukpbj.demakkab.go.id
+SSO_ENABLED=true
+```
+
+Client di IdP (`/admin/clients`) harus memuat:
+
+- `redirect_uris`: `https://arjuna.ukpbj.demakkab.go.id/sso/callback` **dan**
+  `https://arjuna.ukpbj.demakkab.go.id` (post-logout)
+- `backchannel_logout_uri`: `https://arjuna.ukpbj.demakkab.go.id/sso/backchannel-logout`
+- `landing_url`: `https://arjuna.ukpbj.demakkab.go.id/sso/login`
+
+> **Jangan** memakai `/auth/callback` di production ARJUNA: route itu tidak ada
+> (404). Pastikan juga nginx/WAF mengizinkan query string ±1 KB karena kode
+> otorisasi Passport bisa 900+ karakter; jika tidak, callback dibalas
+> **`403 Forbidden` oleh nginx** (bukan oleh Laravel).
+>
+> Di server ARJUNA, 403 tersebut berasal dari **rule per-vhost** yang membatasi
+> total request URI ±330 karakter (diuji: URI 330 karakter → `200`, 331 → `403`).
+> Rule ini **tidak** berlaku di vhost `sso.ukpbj.demakkab.go.id`. Cari
+> `330`/`331`/`return 403`/`request_uri` di konfigurasi vhost
+> `arjuna.ukpbj.demakkab.go.id`, bukan di konfigurasi global IdP.
 
 ### Aplikasi di Dashboard User
 
@@ -917,6 +1060,10 @@ SSO_CLIENT_SECRET=<secret dari panel IdP>
 SSO_REDIRECT_URI=http://localhost:8001/sso/callback
 SSO_LOGOUT_URI=http://localhost:8001/
 SSO_ENABLED=true
+
+# Wajib untuk produksi di belakang Nginx/WAF: kirim code lewat body POST
+# (URI callback tetap pendek → tidak kena 403 batas panjang request URI).
+SSO_RESPONSE_MODE=form_post
 
 # Opsional
 # SSO_HTTP_TIMEOUT=15
@@ -2134,6 +2281,8 @@ Dua hal yang mudah terlewat setelah client terdaftar:
 - [ ] **Database**: Tambah kolom `sso_sub`, `nip` ke tabel `users` & ubah `password` jadi nullable. Gunakan `SESSION_DRIVER=database`
 - [ ] **IdP**: Daftarkan client dengan `redirect_uris` dan `backchannel_logout_uri` yang benar
 - [ ] **IdP**: Tambahkan origin aplikasi ke `SSO_FORM_ACTION_ORIGINS` lalu `php artisan config:clear`
+- [ ] **IdP**: Pastikan `\App\Http\Middleware\AuthorizeResponseMode::class` terdaftar di group `web` (`bootstrap/app.php`) — wajib untuk `form_post`
+- [ ] **Klien**: `SSO_RESPONSE_MODE=form_post` (default `config/sso.php`) agar callback tidak memakai query string 900+ karakter
 - [ ] **JWKS**: Cache `/oauth/jwks` + stale fallback (dan prewarm saat login) agar SLO tidak deadlock di dev server
 - [ ] **Uji alur**: Akses route terproteksi → redirect ke IdP → login → callback kembali ke aplikasi klien
 - [ ] **Uji logout lokal**: `Auth::logout()` + invalidate session **tanpa** memanggil `/sso/logout` → sesi klien berakhir, sesi IdP tetap aktif

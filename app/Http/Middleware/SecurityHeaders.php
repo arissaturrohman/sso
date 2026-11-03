@@ -18,8 +18,11 @@ class SecurityHeaders
         $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 
         // Origin aplikasi client yang boleh menjadi tujuan akhir submit form
-        // login (mis. http://localhost:8001). Diambil dari konfigurasi.
+        // login (mis. http://localhost:8001). Diambil dari konfigurasi, ditambah
+        // origin dinamis dari middleware AuthorizeResponseMode (response_mode
+        // = form_post) agar klien baru tidak perlu didaftarkan manual.
         $allowedFormOrigins = collect(config('sso.form_action_origins', []))
+            ->push($request->attributes->get('sso.form_action_origin'))
             ->filter()
             ->map(fn ($origin) => rtrim(trim((string) $origin), '/'))
             ->unique()

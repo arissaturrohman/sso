@@ -32,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
         //  0. tolak akun non-aktif / sesi yang sudah logout
         //  1. paksa ganti password sebelum halaman lain
         //  2. tracking authorize (hanya setelah lolos cek password)
+        //  3. dukung response_mode=form_post (anti 403 URI panjang)
         //  + SEO: share title/description/robots/canonical/JSON-LD per route
         //    (harus pertama agar data tersedia sebelum view di-render)
         $middleware->web(append: [
@@ -39,6 +40,7 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\EnsureAccountIsActive::class,
             \App\Http\Middleware\ForcePasswordChange::class,
             \App\Http\Middleware\TrackAuthorizeRequest::class,
+            \App\Http\Middleware\AuthorizeResponseMode::class,
         ]);
 
         // CSRF hanya dilepas untuk revoke (server-to-server, no session)
