@@ -18,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'track-authorize' => \App\Http\Middleware\TrackAuthorizeRequest::class,
             'admin' => \App\Http\Middleware\EnsureUserIsAdmin::class,
             'active' => \App\Http\Middleware\EnsureAccountIsActive::class,
+            'pbj' => \App\Http\Middleware\EnsurePbjAccess::class,
         ]);
 
         // Waktu mulai request harus tercatat sebelum middleware lain (dipakai

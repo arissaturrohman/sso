@@ -26,6 +26,7 @@ class User extends Authenticatable
         'password_sent_at',
         'password_changed_at',
         'must_change_password',
+        'is_pbj',
     ];
 
     protected $hidden = [
@@ -41,6 +42,7 @@ class User extends Authenticatable
             'password_sent_at' => 'datetime',
             'password_changed_at' => 'datetime',
             'must_change_password' => 'boolean',
+            'is_pbj' => 'boolean',
             'password' => 'hashed',
             // Epoch keamanan: token yang created_at <= nilai ini ditolak.
             'tokens_valid_after' => 'datetime',

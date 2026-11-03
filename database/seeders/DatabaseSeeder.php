@@ -19,5 +19,11 @@ class DatabaseSeeder extends Seeder
             'name' => 'Test User',
             'email' => 'test@example.com',
         ]);
+        
+        // Run PBJ seeder
+        $this->call(UserPbjSeeder::class);
+        
+        // Run client access seeder
+        $this->call(ClientAccessSeeder::class);
     }
 }

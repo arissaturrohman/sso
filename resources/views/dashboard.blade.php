@@ -7,6 +7,25 @@
         <div>
             <h1 class="page-head__title">Dashboard</h1>
             <p class="page-head__sub">Ringkasan akun dan akses SSO Anda.</p>
+            
+            @if ($isPbj)
+                <div class="alert alert--success">
+                    <span class="alert__icon">@include('partials.icon', ['name' => 'check'])</span>
+                    <div class="alert__body">
+                        <strong>Staf PBJ</strong> - Anda memiliki akses ke {{ $accessibleClients }} dari {{ $totalClients }} aplikasi klien yang tersedia.
+                    </div>
+                </div>
+            @else
+                <div class="alert alert--info">
+                    <span class="alert__icon">@include('partials.icon', ['name' => 'user'])</span>
+                    <div class="alert__body">
+                        <strong>User OPD</strong> - Anda memiliki akses ke {{ $accessibleClients }} dari {{ $totalClients }} aplikasi klien yang tersedia.
+                        @if ($userOpd)
+                            <br><small>OPD: {{ $userOpd }}</small>
+                        @endif
+                    </div>
+                </div>
+            @endif
         </div>
         <div class="page-head__actions">
             <a href="{{ route('sessions.index') }}" class="btn btn--secondary btn--sm">Perangkat &amp; Sesi</a>
