@@ -41,12 +41,7 @@ class SessionsController extends Controller
                 ];
             });
 
-        return view('sessions.index', [
-            'sessions' => $sessions,
-            'isPbj' => $user->is_pbj,
-            'userName' => $user->name,
-            'userEmail' => $user->email,
-        ]);
+        return view('sessions.index', ['sessions' => $sessions]);
     }
 
     /**

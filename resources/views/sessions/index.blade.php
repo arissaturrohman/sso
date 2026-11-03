@@ -7,22 +7,6 @@
         <div>
             <h1 class="page-head__title">Perangkat &amp; Sesi</h1>
             <p class="page-head__sub">Kelola sesi portal dan aplikasi yang terhubung ke akun Anda.</p>
-            
-            @if ($isPbj)
-                <div class="alert alert--success">
-                    <span class="alert__icon">@include('partials.icon', ['name' => 'check'])</span>
-                    <div class="alert__body">
-                        <strong>Staf PBJ</strong> - Anda memiliki akses ke semua aplikasi klien yang tersedia.
-                    </div>
-                </div>
-            @else
-                <div class="alert alert--warning">
-                    <span class="alert__icon">@include('partials.icon', ['name' => 'alert'])</span>
-                    <div class="alert__body">
-                        <strong>User OPD</strong> - Anda hanya dapat melihat aplikasi klien untuk OPD Anda.
-                    </div>
-                </div>
-            @endif
         </div>
     </div>
 

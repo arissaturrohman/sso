@@ -85,10 +85,19 @@ Route::middleware('auth')->group(function () {
     Route::get('/password/change', [PasswordChangeController::class, 'edit'])->name('password.change');
     Route::put('/password/change', [PasswordChangeController::class, 'update'])->name('password.change.update');
 
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
-    Route::get('/sessions', [SessionsController::class, 'index'])
-    ->middleware(['auth', 'pbj'])
-    ->name('sessions.index');
+    Route::get('/dashboard', function () {
+        $clientModel = \Laravel\Passport\Passport::clientModel();
+
+        // Aplikasi klien aktif yang bisa dibuka user dari dashboard IdP
+        $apps = $clientModel::query()
+            ->where('revoked', false)
+            ->whereNotNull('landing_url')
+            ->orderBy('name')
+            ->get();
+
+        return view('dashboard', compact('apps'));
+    })->name('dashboard');
+    Route::get('/sessions', [SessionsController::class, 'index'])->name('sessions.index');
     Route::delete('/sessions/{session}', [SessionsController::class, 'destroy'])
         ->middleware('throttle:30,1')
         ->name('sessions.destroy');
