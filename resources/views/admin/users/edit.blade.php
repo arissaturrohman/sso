@@ -69,6 +69,16 @@
         </div>
 
         <div class="form-group">
+            <label class="label" for="user_type">Jenis Pegawai</label>
+            <select class="select" id="user_type" name="user_type">
+                <option value="">— Pilih —</option>
+                <option value="opd" {{ (old('user_type', $user->user_type) ?? '') === 'opd' ? 'selected' : '' }}>OPD</option>
+                <option value="pbj" {{ (old('user_type', $user->user_type) ?? '') === 'pbj' ? 'selected' : '' }}>Staf PBJ</option>
+            </select>
+            <p class="field-help">Opsional. Hanya untuk label di panel admin.</p>
+        </div>
+
+        <div class="form-group">
             <label class="check" for="must_change_password">
                 <input id="must_change_password" type="checkbox" name="must_change_password" value="1"
                        @checked(old('must_change_password', $errors->any() ? 0 : $user->must_change_password))>

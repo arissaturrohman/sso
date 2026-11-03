@@ -9,7 +9,7 @@
             <p class="page-head__sub">Ringkasan akun dan akses SSO Anda.</p>
         </div>
         <div class="page-head__actions">
-            <a href="{{ route('sessions.index') }}" class="btn btn--secondary btn--sm">Perangkat &amp; Sesi</a>
+            <a href="{{ route('sessions.index') }}" class="btn btn--secondary btn--sm">Perangkat & Sesi</a>
             <a href="{{ route('password.change') }}" class="btn btn--secondary btn--sm">Ubah Password</a>
         </div>
     </div>
@@ -57,7 +57,7 @@
 
         <div class="form-actions">
             <a href="{{ route('password.change') }}" class="btn btn--secondary">Ubah Password</a>
-            <a href="{{ route('sessions.index') }}" class="btn">Lihat Perangkat &amp; Sesi Aktif</a>
+            <a href="{{ route('sessions.index') }}" class="btn">Lihat Perangkat & Sesi Aktif</a>
             <form method="POST" action="{{ route('logout') }}">
                 @csrf
                 <button type="submit" class="btn btn--danger-outline">Logout (semua aplikasi)</button>
@@ -84,6 +84,11 @@
                         <span class="app-tile__body">
                             <span class="app-tile__name">{{ $app->name }}</span>
                             <span class="app-tile__meta">Buka di tab baru</span>
+                            @if ($app->client_type)
+                                <span class="badge badge--{{ $app->client_type === 'opd' ? 'info' : 'warning' }} badge--sm">
+                                    {{ $app->client_type === 'opd' ? 'OPD' : 'Staf PBJ' }}
+                                </span>
+                            @endif
                         </span>
                         <span class="app-tile__arrow">@include('partials.icon', ['name' => 'external'])</span>
                     </a>

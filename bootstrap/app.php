@@ -18,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'track-authorize' => \App\Http\Middleware\TrackAuthorizeRequest::class,
             'admin' => \App\Http\Middleware\EnsureUserIsAdmin::class,
             'active' => \App\Http\Middleware\EnsureAccountIsActive::class,
+            'mismatch-check' => \App\Http\Middleware\CheckClientUserTypeMatch::class,
         ]);
 
         // Waktu mulai request harus tercatat sebelum middleware lain (dipakai
@@ -40,6 +41,7 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\EnsureAccountIsActive::class,
             \App\Http\Middleware\ForcePasswordChange::class,
             \App\Http\Middleware\TrackAuthorizeRequest::class,
+            \App\Http\Middleware\CheckClientUserTypeMatch::class,
             \App\Http\Middleware\AuthorizeResponseMode::class,
         ]);
 

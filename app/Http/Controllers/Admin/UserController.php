@@ -67,10 +67,12 @@ class UserController extends Controller
             'whatsapp' => ['required', 'string', 'max:20', new WhatsAppNumber()],
             'role' => ['required', 'in:admin,user'],
             'status' => ['required', 'in:active,suspended,inactive'],
+            'user_type' => ['nullable', 'in:opd,pbj'],
         ], [
             'nip.required' => 'NIP wajib diisi.',
             'nip.unique' => 'NIP sudah digunakan oleh user lain.',
             'whatsapp.required' => 'Nomor WhatsApp wajib diisi (password dikirim ke nomor ini).',
+            'user_type.in' => 'Jenis pegawai harus OPD atau Staf PBJ.',
         ]);
 
         $plainPassword = PasswordGenerator::generate(12);
@@ -122,9 +124,11 @@ class UserController extends Controller
             'role' => ['required', 'in:admin,user'],
             'status' => ['required', 'in:active,suspended,inactive'],
             'must_change_password' => ['sometimes', 'boolean'],
+            'user_type' => ['nullable', 'in:opd,pbj'],
         ], [
             'nip.required' => 'NIP wajib diisi.',
             'nip.unique' => 'NIP sudah digunakan oleh user lain.',
+            'user_type.in' => 'Jenis pegawai harus OPD atau Staf PBJ.',
         ]);
 
         // Admin tidak boleh menurunkan role / menonaktifkan akunnya sendiri.

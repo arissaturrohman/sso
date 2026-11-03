@@ -19,6 +19,7 @@
                 <tr>
                     <th scope="col">Nama</th>
                     <th scope="col">Client ID</th>
+                    <th scope="col">Jenis</th>
                     <th scope="col">Trusted</th>
                     <th scope="col">Landing URL</th>
                     <th scope="col">Back-channel URI</th>
@@ -34,6 +35,19 @@
                             <code class="code">{{ $c->id }}</code>
                             <button type="button" class="btn btn--secondary btn--sm ml-2"
                                     onclick="navigator.clipboard.writeText('{{ $c->id }}'); this.textContent='Tersalin!'; setTimeout(()=>this.textContent='Copy',1200)">Copy</button>
+                        </td>
+                        <td>
+                            @if ($c->client_type)
+                                @if ($c->client_type === 'opd')
+                                    <span class="badge badge--info">OPD</span>
+                                @elseif ($c->client_type === 'pbj')
+                                    <span class="badge badge--success">Staf PBJ</span>
+                                @else
+                                    <span class="badge badge--neutral">{{ $c->client_type }}</span>
+                                @endif
+                            @else
+                                <span class="cell-muted">—</span>
+                            @endif
                         </td>
                         <td>
                             @if ($c->trusted)

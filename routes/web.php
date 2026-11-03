@@ -61,6 +61,20 @@ Route::get('/oauth/jwks', [JwksController::class, 'jwks'])
 
 /*
 |--------------------------------------------------------------------------
+| Peringatan ketidaksesuaian Jenis User vs Jenis Aplikasi Klien
+|--------------------------------------------------------------------------
+*/
+Route::middleware(['auth'])->group(function () {
+    Route::get('/oauth/mismatch-warning', [\App\Http\Controllers\Oauth\MismatchController::class, 'warning'])
+        ->name('oauth.mismatch-warning');
+    Route::post('/oauth/mismatch-continue', [\App\Http\Controllers\Oauth\MismatchController::class, 'continue'])
+        ->name('oauth.mismatch-continue');
+    Route::post('/oauth/mismatch-cancel', [\App\Http\Controllers\Oauth\MismatchController::class, 'cancel'])
+        ->name('oauth.mismatch-cancel');
+});
+
+/*
+|--------------------------------------------------------------------------
 | Panel Admin (manajemen user & aplikasi klien) — role admin saja
 |--------------------------------------------------------------------------
 */

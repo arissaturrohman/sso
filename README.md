@@ -912,6 +912,19 @@ Setelah mengubah konfigurasi di kedua sisi:
 php artisan config:clear && php artisan config:cache
 ```
 
+Verifikasi cepat setelah deploy (tanpa perlu login):
+
+```bash
+# 1. Klien WAJIB mengirim response_mode=form_post pada URL authorize
+curl -sI https://sim-ukpbj.demakkab.go.id/sso/login | grep -i '^location:'
+#    Location harus memuat: ...&response_mode=form_post
+#    Jika tidak ada -> config/sso.php / SsoClientService / cache klien belum ter-deploy
+
+# 2. IdP harus membalas HTML form_post (bukan 302 ?code=...)
+curl -s "https://sso.ukpbj.demakkab.go.id/oauth/authorize?response_type=code&client_id=<CLIENT_ID>&redirect_uri=<REDIRECT_URI>&scope=openid%20profile%20email&state=probe&code_challenge=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&code_challenge_method=S256&response_mode=form_post&prompt=none"
+#    Harus 200 text/html berisi: <form method="post" action="https://.../sso/callback">
+```
+
 > **Penting saat deploy:** `app/Http/Middleware/AuthorizeResponseMode.php` masih
 > **untracked** di git IdP. Jalankan
 > `git add app/Http/Middleware/AuthorizeResponseMode.php bootstrap/app.php`

@@ -39,6 +39,20 @@
             <span class="data-list__label">Redirect URIs</span>
             <span class="data-list__value">{{ implode(', ', $client->redirect_uris ?? []) }}</span>
         </div>
+        @if ($client->client_type)
+        <div class="data-list__item">
+            <span class="data-list__label">Jenis Aplikasi</span>
+            <span class="data-list__value">
+                @if ($client->client_type === 'opd')
+                    <span class="badge badge--info">OPD</span>
+                @elseif ($client->client_type === 'pbj')
+                    <span class="badge badge--success">Staf PBJ</span>
+                @else
+                    {{ $client->client_type }}
+                @endif
+            </span>
+        </div>
+        @endif
         <div class="data-list__item">
             <span class="data-list__label">Landing URL</span>
             <span class="data-list__value">{{ $client->landing_url ?? '— (atur di menu Edit agar tampil di dashboard user)' }}</span>

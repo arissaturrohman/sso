@@ -72,6 +72,16 @@
             </div>
         </div>
 
+        <div class="form-group">
+            <label class="label" for="user_type">Jenis Pegawai</label>
+            <select class="select" id="user_type" name="user_type">
+                <option value="">— Pilih —</option>
+                <option value="opd" {{ old('user_type') === 'opd' ? 'selected' : '' }}>OPD</option>
+                <option value="pbj" {{ old('user_type') === 'pbj' ? 'selected' : '' }}>Staf PBJ</option>
+            </select>
+            <p class="field-help">Opsional. Hanya untuk label di panel admin.</p>
+        </div>
+
         <div class="form-actions">
             <button class="btn" type="submit">Simpan &amp; Kirim WhatsApp</button>
             <a href="{{ route('admin.users.index') }}" class="btn btn--secondary">Batal</a>

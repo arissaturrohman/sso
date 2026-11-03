@@ -21,6 +21,7 @@ class User extends Authenticatable
         'password',
         'status',
         'role',
+        'user_type',
         'last_login_at',
         'last_login_ip',
         'password_sent_at',
@@ -44,6 +45,7 @@ class User extends Authenticatable
             'password' => 'hashed',
             // Epoch keamanan: token yang created_at <= nilai ini ditolak.
             'tokens_valid_after' => 'datetime',
+            'user_type' => 'string',
         ];
     }
 

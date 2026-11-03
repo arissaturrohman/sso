@@ -71,6 +71,11 @@
             <option value="suspended" @selected(request('status') === 'suspended')>Suspended</option>
             <option value="inactive" @selected(request('status') === 'inactive')>Inactive</option>
         </select>
+        <select class="select" name="user_type">
+            <option value="">Semua Jenis</option>
+            <option value="opd" @selected(request('user_type') === 'opd')>OPD</option>
+            <option value="pbj" @selected(request('user_type') === 'pbj')>Staf PBJ</option>
+        </select>
         <button class="btn" type="submit">Cari</button>
     </form>
 
@@ -82,6 +87,7 @@
                     <th scope="col">Email</th>
                     <th scope="col">NIP</th>
                     <th scope="col">WhatsApp</th>
+                    <th scope="col">Jenis</th>
                     <th scope="col">Role</th>
                     <th scope="col">Status</th>
                     <th scope="col">Login Terakhir</th>
@@ -105,6 +111,19 @@
                             {{ $u->whatsappDisplay() ?? '—' }}
                             @if ($u->password_sent_at)
                                 <div class="cell-muted" title="Password terakhir dikirim via WhatsApp">WA &middot; {{ $u->password_sent_at->format('d M H:i') }}</div>
+                            @endif
+                        </td>
+                        <td>
+                            @if ($u->user_type)
+                                @if ($u->user_type === 'opd')
+                                    <span class="badge badge--info">OPD</span>
+                                @elseif ($u->user_type === 'pbj')
+                                    <span class="badge badge--success">Staf PBJ</span>
+                                @else
+                                    <span class="badge badge--neutral">{{ $u->user_type }}</span>
+                                @endif
+                            @else
+                                <span class="cell-muted">—</span>
                             @endif
                         </td>
                         <td><span class="badge {{ $u->role === 'admin' ? 'badge--info' : 'badge--neutral' }}">{{ $u->role }}</span></td>

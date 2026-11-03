@@ -43,6 +43,7 @@ class OAuthClientController extends Controller
             'landing_url' => $validated['landing_url'] ?? null,
             'backchannel_logout_uri' => $validated['backchannel_logout_uri'] ?? null,
             'frontchannel_logout_uri' => $validated['frontchannel_logout_uri'] ?? null,
+            'client_type' => $validated['client_type'] ?? null,
         ])->save();
 
         // Secret ditampilkan SEKALI di halaman khusus (plainSecret hanya tersedia saat pembuatan)
@@ -89,6 +90,7 @@ class OAuthClientController extends Controller
             'landing_url' => $validated['landing_url'] ?? null,
             'backchannel_logout_uri' => $validated['backchannel_logout_uri'] ?? null,
             'frontchannel_logout_uri' => $validated['frontchannel_logout_uri'] ?? null,
+            'client_type' => $validated['client_type'] ?? null,
         ])->save();
 
         return redirect()->route('admin.clients.index')->with('status', 'Aplikasi klien berhasil diperbarui.');
@@ -146,21 +148,27 @@ class OAuthClientController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'redirect_uris' => ['required', 'array', 'min:1'],
             'redirect_uris.*' => ['required', 'url', 'max:255'],
-            // Server-side fetch: wajib HTTPS + host publik (anti-SSRF).
             'backchannel_logout_uri' => ['nullable', 'url', 'max:255', new SafeExternalUrl],
             'frontchannel_logout_uri' => ['nullable', 'url', 'max:255', new SafeExternalUrl],
             'landing_url' => ['nullable', 'url', 'max:255'],
             'trusted' => ['nullable', 'boolean'],
+            'client_type' => ['nullable', 'in:opd,pbj'],
         ], [
             'redirect_uris.required' => 'Minimal satu Redirect URI wajib diisi.',
             'redirect_uris.min' => 'Minimal satu Redirect URI wajib diisi.',
             'redirect_uris.*.url' => 'Setiap redirect URI harus berupa URL yang valid.',
+            'client_type.in' => 'Jenis aplikasi harus OPD atau Staf PBJ.',
         ]);
 
         // Normalisasi: string kosong dianggap tidak diatur (null),
         // supaya whereNotNull / ?? '—' di view bekerja konsisten.
         foreach (['backchannel_logout_uri', 'frontchannel_logout_uri', 'landing_url'] as $field) {
             $validated[$field] = filled($validated[$field] ?? null) ? $validated[$field] : null;
+        }
+
+        // client_type: kosong = null
+        if (empty($validated['client_type'] ?? null)) {
+            $validated['client_type'] = null;
         }
 
         return $validated;

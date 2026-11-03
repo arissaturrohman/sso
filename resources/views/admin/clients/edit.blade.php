@@ -47,6 +47,16 @@
         </div>
 
         <div class="form-group">
+            <label class="label" for="client_type">Jenis Aplikasi</label>
+            <select class="input" id="client_type" name="client_type">
+                <option value="">— Pilih —</option>
+                <option value="opd" {{ (old('client_type', $client->client_type) ?? '') === 'opd' ? 'selected' : '' }}>OPD</option>
+                <option value="pbj" {{ (old('client_type', $client->client_type) ?? '') === 'pbj' ? 'selected' : '' }}>Staf PBJ</option>
+            </select>
+            <p class="field-help">Opsional. Hanya untuk label di panel admin.</p>
+        </div>
+
+        <div class="form-group">
             <label class="check" for="trusted">
                 <input id="trusted" type="checkbox" name="trusted" value="1" @checked(old('trusted', $client->trusted))>
                 <span class="check__text">Trusted (lewati halaman consent)</span>
