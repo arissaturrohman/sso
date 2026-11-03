@@ -1160,11 +1160,15 @@ pengambilan profil dari `/oauth/userinfo`, validasi sesi, dan pembuatan URL
 RP-initiated logout. Implementasi SIM-UKPBJ memakai **Guzzle** dan menyimpan
 token di session.
 
+**Perbaikan `403 Forbidden`**: Method `getAuthorizationUrl()` kini menambahkan
+parameter `response_mode=form_post` agar kode otorisasi dikirim lewat body POST
+(bukan query string), menghindari batas panjang URI nginx/WAF (±330 karakter).
+
 Method utama:
 
 | Method | Kegunaan |
 |---|---|
-| `getAuthorizationUrl()` | Buat URL `/oauth/authorize` + `state` + PKCE S256 |
+| `getAuthorizationUrl()` | Buat URL `/oauth/authorize` + `state` + PKCE S256 + **`response_mode=form_post`** |
 | `exchangeCodeForTokens($code, $state)` | Validasi `state`, tukar code, simpan token |
 | `getUserInfo()` | Ambil profil; refresh otomatis sekali bila access token `401` |
 | `refreshToken()` | Refresh token rotation, simpan token baru |
@@ -1236,6 +1240,7 @@ class SsoClientService
             'state' => $state,
             'code_challenge' => $codeChallenge,
             'code_challenge_method' => 'S256',
+            'response_mode' => 'form_post', // anti 403 URI panjang (nginx/WAF)
         ];
 
         return $this->ssoUrl.'/oauth/authorize?'.http_build_query($params, '', '&', PHP_QUERY_RFC3986);
@@ -2181,6 +2186,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'sso' => \App\Http\Middleware\SsoMiddleware::class,
         ]);
 
+        // Trust proxy headers (X-Forwarded-*) agar skema HTTPS dari reverse proxy terbaca.
+        // Wajib saat aplikasi di belakang Nginx/load balancer dengan SSL termination.
+        $middleware->trustProxies(at: '*');
+
         // Tamu yang membuka halaman terproteksi diarahkan ke login SSO.
         // URL tujuan disimpan agar setelah login user kembali ke halaman itu.
         $middleware->redirectGuestsTo(function (\Illuminate\Http\Request $request) {
@@ -2191,9 +2200,10 @@ return Application::configure(basePath: dirname(__DIR__))
             return route('sso.login');
         });
 
-        // Back-channel logout dikirim server-to-server oleh IdP, tanpa CSRF token.
+        // Back-channel logout DAN callback SSO dikirim server-to-server / redirect tanpa CSRF token.
         $middleware->validateCsrfTokens(except: [
             'sso/backchannel-logout',
+            'sso/callback',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -2290,12 +2300,12 @@ Dua hal yang mudah terlewat setelah client terdaftar:
 - [ ] **Dependency**: `composer require firebase/php-jwt:^6.10 guzzlehttp/guzzle:^7.8` (wajib); `laravel/passport` **tidak** dipakai di klien
 - [ ] **Ekstensi PHP**: `openssl`, `curl`, `mbstring`, `json`, `fileinfo`, `pdo` (+ driver DB)
 - [ ] **File wajib (SIM-UKPBJ)**: `config/sso.php`, `app/Services/SsoClientService.php`, `app/Services/LogoutTokenVerifier.php`, `app/Exceptions/JwksUnavailableException.php`, `app/Http/Middleware/SsoMiddleware.php`, `app/Http/Controllers/SsoController.php`, `routes/web.php`, `bootstrap/app.php`
-- [ ] **Bootstrap**: Register middleware alias `sso` dan tambahkan `sso/backchannel-logout` ke `validateCsrfTokens(except: [])`
+- [ ] **Bootstrap**: Register middleware alias `sso` + `trustProxies(at: '*')` + `validateCsrfTokens(except: ['sso/backchannel-logout', 'sso/callback'])`
 - [ ] **Database**: Tambah kolom `sso_sub`, `nip` ke tabel `users` & ubah `password` jadi nullable. Gunakan `SESSION_DRIVER=database`
 - [ ] **IdP**: Daftarkan client dengan `redirect_uris` dan `backchannel_logout_uri` yang benar
 - [ ] **IdP**: Tambahkan origin aplikasi ke `SSO_FORM_ACTION_ORIGINS` lalu `php artisan config:clear`
 - [ ] **IdP**: Pastikan `\App\Http\Middleware\AuthorizeResponseMode::class` terdaftar di group `web` (`bootstrap/app.php`) — wajib untuk `form_post`
-- [ ] **Klien**: `SSO_RESPONSE_MODE=form_post` (default `config/sso.php`) agar callback tidak memakai query string 900+ karakter
+- [ ] **Klien**: `SSO_RESPONSE_MODE=form_post` (default `config/sso.php`) + `SsoClientService::getAuthorizationUrl()` kirim `response_mode=form_post` agar callback tidak memakai query string 900+ karakter
 - [ ] **JWKS**: Cache `/oauth/jwks` + stale fallback (dan prewarm saat login) agar SLO tidak deadlock di dev server
 - [ ] **Uji alur**: Akses route terproteksi → redirect ke IdP → login → callback kembali ke aplikasi klien
 - [ ] **Uji logout lokal**: `Auth::logout()` + invalidate session **tanpa** memanggil `/sso/logout` → sesi klien berakhir, sesi IdP tetap aktif
