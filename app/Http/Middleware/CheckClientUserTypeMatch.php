@@ -58,8 +58,16 @@ class CheckClientUserTypeMatch
             return $next($request);
         }
 
-        // Cek kecocokan
-        if ($user->user_type !== $client->client_type) {
+        // Logika hierarki:
+        // - App OPD (client_type='opd') → boleh diakses OPD & PBJ
+        // - App PBJ (client_type='pbj') → hanya boleh diakses PBJ
+        $allow = match ($client->client_type) {
+            'opd' => in_array($user->user_type, ['opd', 'pbj']), // OPD app: both can access
+            'pbj' => $user->user_type === 'pbj',                   // PBJ app: only PBJ
+            default => true,                                       // unknown type: allow
+        };
+
+        if (! $allow) {
             // Simpan auth_token ke session agar bisa lanjut setelah warning
             $authToken = $request->query('auth_token');
             if ($authToken) {

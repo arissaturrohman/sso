@@ -20,15 +20,19 @@
         <div class="alert alert--warning mt-4">
             <span class="alert__icon">@include('partials.icon', ['name' => 'alert'])</span>
             <div class="alert__body">
-                <strong class="alert__title">Jenis aplikasi tidak cocok</strong>
+                <strong class="alert__title">Akses Terbatas</strong>
                 <p class="mt-2">
                     Anda login sebagai <strong>{{ $userTypeLabel }}</strong>, tetapi aplikasi
                     <strong>{{ $clientName }}</strong> diperuntukkan untuk
                     <strong>{{ $clientTypeLabel }}</strong>.
                 </p>
                 <p class="mt-2 text-sm">
-                    Mengakses aplikasi yang tidak sesuai bisa menyebabkan akses ditolak,
-                    data tidak lengkap, atau fitur tidak berfungsi sebagaimana mestinya.
+                    @if ($clientTypeLabel === 'Staf PBJ')
+                        Aplikasi Staf PBJ hanya bisa diakses oleh user bertipe <strong>Staf PBJ</strong>.
+                        User OPD tidak diizinkan mengakses aplikasi ini.
+                    @else
+                        Aplikasi ini tidak sesuai dengan peran Anda.
+                    @endif
                 </p>
             </div>
         </div>
